@@ -187,7 +187,7 @@ function SitesSettings({ sites }) {
           <div className="space-y-3">
             {sites.map((site) => (
               <div
-                key={site._id}
+                key={site.id}
                 className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
               >
                 <div className="flex items-center gap-3">

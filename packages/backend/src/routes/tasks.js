@@ -1,0 +1,1247 @@
+const express = require('express');
+const { body, param, validationResult } = require('express-validator');
+const { verifyToken } = require('../middleware/auth');
+const firestoreService = require('../services/firestore');
+const accountingService = require('../services/accounting');
+const { v4: uuidv4 } = require('uuid');
+
+const router = express.Router();
+
+// All routes require authentication
+router.use(verifyToken);
+
+// ============================================
+// TASK TEMPLATES
+// ============================================
+
+/**
+ * GET /api/tasks/templates
+ * List all task templates for the tenant
+ */
+router.get('/templates', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const { category, activeOnly, siteId } = req.query;
+
+    const templates = await firestoreService.getTaskTemplates(userData.tenantId, {
+      category,
+      activeOnly: activeOnly !== 'false',
+      siteId,
+    });
+
+    res.json({
+      success: true,
+      data: { templates },
+    });
+  } catch (error) {
+    console.error('Error fetching task templates:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch task templates' });
+  }
+});
+
+/**
+ * GET /api/tasks/templates/:id
+ * Get a single task template
+ */
+router.get(
+  '/templates/:id',
+  [param('id').notEmpty().withMessage('Template ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const template = await firestoreService.getTaskTemplate(userData.tenantId, req.params.id);
+
+      if (!template) {
+        return res.status(404).json({ success: false, message: 'Template not found' });
+      }
+
+      res.json({
+        success: true,
+        data: { template },
+      });
+    } catch (error) {
+      console.error('Error fetching task template:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch task template' });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/templates
+ * Create a new task template
+ */
+router.post(
+  '/templates',
+  [
+    body('name').notEmpty().withMessage('Name is required'),
+    body('category').optional().isIn(Object.values(firestoreService.TaskCategory)),
+    body('priority').optional().isIn(Object.values(firestoreService.TaskPriority)),
+    body('estimatedDurationMinutes').optional().isNumeric(),
+    body('recurrence.pattern').optional().isIn(Object.values(firestoreService.RecurrencePattern)),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has admin role for creating templates
+      if (!['owner', 'admin'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to create task templates',
+        });
+      }
+
+      const template = await firestoreService.createTaskTemplate(
+        userData.tenantId,
+        req.body,
+        req.firebaseUser.uid
+      );
+
+      res.status(201).json({
+        success: true,
+        data: { template },
+      });
+    } catch (error) {
+      console.error('Error creating task template:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to create task template',
+      });
+    }
+  }
+);
+
+/**
+ * PATCH /api/tasks/templates/:id
+ * Update a task template
+ */
+router.patch(
+  '/templates/:id',
+  [param('id').notEmpty().withMessage('Template ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has admin role
+      if (!['owner', 'admin'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to update task templates',
+        });
+      }
+
+      const template = await firestoreService.updateTaskTemplate(
+        userData.tenantId,
+        req.params.id,
+        req.body
+      );
+
+      res.json({
+        success: true,
+        data: { template },
+      });
+    } catch (error) {
+      console.error('Error updating task template:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to update task template',
+      });
+    }
+  }
+);
+
+/**
+ * DELETE /api/tasks/templates/:id
+ * Deactivate a task template
+ */
+router.delete(
+  '/templates/:id',
+  [param('id').notEmpty().withMessage('Template ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has admin role
+      if (!['owner', 'admin'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to delete task templates',
+        });
+      }
+
+      await firestoreService.deleteTaskTemplate(userData.tenantId, req.params.id);
+
+      res.json({
+        success: true,
+        message: 'Template deactivated successfully',
+      });
+    } catch (error) {
+      console.error('Error deleting task template:', error);
+      res.status(500).json({ success: false, message: 'Failed to delete task template' });
+    }
+  }
+);
+
+// ============================================
+// RUNLISTS
+// ============================================
+
+/**
+ * GET /api/tasks/runlists
+ * List all runlists for the tenant
+ */
+router.get('/runlists', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const { status, siteId, limit } = req.query;
+
+    const runlists = await firestoreService.getRunlists(userData.tenantId, {
+      status,
+      siteId,
+      limit: limit ? parseInt(limit) : undefined,
+    });
+
+    res.json({
+      success: true,
+      data: { runlists },
+    });
+  } catch (error) {
+    console.error('Error fetching runlists:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch runlists' });
+  }
+});
+
+/**
+ * GET /api/tasks/runlists/:id
+ * Get a single runlist
+ */
+router.get(
+  '/runlists/:id',
+  [param('id').notEmpty().withMessage('Runlist ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const runlist = await firestoreService.getRunlist(userData.tenantId, req.params.id);
+
+      if (!runlist) {
+        return res.status(404).json({ success: false, message: 'Runlist not found' });
+      }
+
+      // Get template details for the runlist
+      const templates = [];
+      for (const templateId of runlist.templateIds || []) {
+        const template = await firestoreService.getTaskTemplate(userData.tenantId, templateId);
+        if (template) {
+          templates.push(template);
+        }
+      }
+
+      res.json({
+        success: true,
+        data: { runlist, templates },
+      });
+    } catch (error) {
+      console.error('Error fetching runlist:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch runlist' });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/runlists
+ * Create a new runlist
+ */
+router.post(
+  '/runlists',
+  [
+    body('name').notEmpty().withMessage('Name is required'),
+    body('templateIds').optional().isArray(),
+    body('scheduleTime').optional().matches(/^\d{2}:\d{2}$/),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to create runlists',
+        });
+      }
+
+      const runlist = await firestoreService.createRunlist(
+        userData.tenantId,
+        req.body,
+        req.firebaseUser.uid
+      );
+
+      res.status(201).json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error creating runlist:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to create runlist',
+      });
+    }
+  }
+);
+
+/**
+ * PATCH /api/tasks/runlists/:id
+ * Update a runlist
+ */
+router.patch(
+  '/runlists/:id',
+  [param('id').notEmpty().withMessage('Runlist ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to update runlists',
+        });
+      }
+
+      const runlist = await firestoreService.updateRunlist(
+        userData.tenantId,
+        req.params.id,
+        req.body
+      );
+
+      res.json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error updating runlist:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to update runlist',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/runlists/:id/activate
+ * Activate a runlist
+ */
+router.post(
+  '/runlists/:id/activate',
+  [param('id').notEmpty().withMessage('Runlist ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to activate runlists',
+        });
+      }
+
+      const runlist = await firestoreService.activateRunlist(userData.tenantId, req.params.id);
+
+      res.json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error activating runlist:', error);
+      res.status(500).json({ success: false, message: 'Failed to activate runlist' });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/runlists/:id/pause
+ * Pause a runlist
+ */
+router.post(
+  '/runlists/:id/pause',
+  [param('id').notEmpty().withMessage('Runlist ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to pause runlists',
+        });
+      }
+
+      const runlist = await firestoreService.pauseRunlist(userData.tenantId, req.params.id);
+
+      res.json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error pausing runlist:', error);
+      res.status(500).json({ success: false, message: 'Failed to pause runlist' });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/runlists/:id/archive
+ * Archive a runlist
+ */
+router.post(
+  '/runlists/:id/archive',
+  [param('id').notEmpty().withMessage('Runlist ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to archive runlists',
+        });
+      }
+
+      const runlist = await firestoreService.archiveRunlist(userData.tenantId, req.params.id);
+
+      res.json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error archiving runlist:', error);
+      res.status(500).json({ success: false, message: 'Failed to archive runlist' });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/runlists/:id/templates
+ * Add templates to a runlist
+ */
+router.post(
+  '/runlists/:id/templates',
+  [
+    param('id').notEmpty().withMessage('Runlist ID is required'),
+    body('templateIds').isArray({ min: 1 }).withMessage('Template IDs array is required'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to modify runlists',
+        });
+      }
+
+      const runlist = await firestoreService.addTemplatesToRunlist(
+        userData.tenantId,
+        req.params.id,
+        req.body.templateIds
+      );
+
+      res.json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error adding templates to runlist:', error);
+      res.status(500).json({ success: false, message: 'Failed to add templates to runlist' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/tasks/runlists/:id/templates
+ * Remove templates from a runlist
+ */
+router.delete(
+  '/runlists/:id/templates',
+  [
+    param('id').notEmpty().withMessage('Runlist ID is required'),
+    body('templateIds').isArray({ min: 1 }).withMessage('Template IDs array is required'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to modify runlists',
+        });
+      }
+
+      const runlist = await firestoreService.removeTemplatesFromRunlist(
+        userData.tenantId,
+        req.params.id,
+        req.body.templateIds
+      );
+
+      res.json({
+        success: true,
+        data: { runlist },
+      });
+    } catch (error) {
+      console.error('Error removing templates from runlist:', error);
+      res.status(500).json({ success: false, message: 'Failed to remove templates from runlist' });
+    }
+  }
+);
+
+// ============================================
+// TASK OCCURRENCES
+// ============================================
+
+/**
+ * GET /api/tasks/occurrences
+ * List task occurrences with filters
+ */
+router.get('/occurrences', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const {
+      status,
+      siteId,
+      assignedToUserId,
+      runlistId,
+      templateId,
+      startDate,
+      endDate,
+      limit,
+    } = req.query;
+
+    const occurrences = await firestoreService.getTaskOccurrences(userData.tenantId, {
+      status,
+      siteId,
+      assignedToUserId,
+      runlistId,
+      templateId,
+      startDate,
+      endDate,
+      limit: limit ? parseInt(limit) : undefined,
+    });
+
+    res.json({
+      success: true,
+      data: { occurrences },
+    });
+  } catch (error) {
+    console.error('Error fetching task occurrences:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch task occurrences' });
+  }
+});
+
+/**
+ * GET /api/tasks/occurrences/my-tasks
+ * Get tasks assigned to current user
+ */
+router.get('/occurrences/my-tasks', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const { daysAhead, limit } = req.query;
+
+    const tasks = await firestoreService.getUpcomingTasks(
+      userData.tenantId,
+      req.firebaseUser.uid,
+      {
+        daysAhead: daysAhead ? parseInt(daysAhead) : 7,
+        limit: limit ? parseInt(limit) : 20,
+      }
+    );
+
+    res.json({
+      success: true,
+      data: { tasks },
+    });
+  } catch (error) {
+    console.error('Error fetching my tasks:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch tasks' });
+  }
+});
+
+/**
+ * GET /api/tasks/occurrences/today
+ * Get today's tasks
+ */
+router.get('/occurrences/today', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const { siteId, assignedToUserId } = req.query;
+
+    const tasks = await firestoreService.getTodaysTasks(userData.tenantId, {
+      siteId,
+      assignedToUserId,
+    });
+
+    res.json({
+      success: true,
+      data: { tasks },
+    });
+  } catch (error) {
+    console.error('Error fetching today\'s tasks:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch today\'s tasks' });
+  }
+});
+
+/**
+ * GET /api/tasks/occurrences/:id
+ * Get a single task occurrence
+ */
+router.get(
+  '/occurrences/:id',
+  [param('id').notEmpty().withMessage('Occurrence ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const occurrence = await firestoreService.getTaskOccurrence(
+        userData.tenantId,
+        req.params.id
+      );
+
+      if (!occurrence) {
+        return res.status(404).json({ success: false, message: 'Task occurrence not found' });
+      }
+
+      res.json({
+        success: true,
+        data: { occurrence },
+      });
+    } catch (error) {
+      console.error('Error fetching task occurrence:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch task occurrence' });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/occurrences
+ * Create an ad-hoc task occurrence
+ */
+router.post(
+  '/occurrences',
+  [
+    body('scheduledDate').notEmpty().withMessage('Scheduled date is required'),
+    body('siteId').optional(),
+    body('templateId').optional(),
+    body('priority').optional().isIn(Object.values(firestoreService.TaskPriority)),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role for creating tasks
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to create tasks',
+        });
+      }
+
+      const occurrence = await firestoreService.createTaskOccurrence(
+        userData.tenantId,
+        req.body,
+        req.firebaseUser.uid
+      );
+
+      res.status(201).json({
+        success: true,
+        data: { occurrence },
+      });
+    } catch (error) {
+      console.error('Error creating task occurrence:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to create task occurrence',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/occurrences/:id/start
+ * Start working on a task
+ */
+router.post(
+  '/occurrences/:id/start',
+  [param('id').notEmpty().withMessage('Occurrence ID is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const occurrence = await firestoreService.startTaskOccurrence(
+        userData.tenantId,
+        req.params.id,
+        req.firebaseUser.uid
+      );
+
+      res.json({
+        success: true,
+        data: { occurrence },
+      });
+    } catch (error) {
+      console.error('Error starting task:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to start task',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/occurrences/:id/complete
+ * Complete a task
+ */
+router.post(
+  '/occurrences/:id/complete',
+  [
+    param('id').notEmpty().withMessage('Occurrence ID is required'),
+    body('notes').optional().isString(),
+    body('actualDurationMinutes').optional().isNumeric(),
+    body('inventoryConsumed').optional().isArray(),
+    body('createLinkedEvent').optional().isBoolean(),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const { tenantId } = userData;
+      const { notes, actualDurationMinutes, inventoryConsumed, createLinkedEvent } = req.body;
+
+      // Get the occurrence first
+      const currentOccurrence = await firestoreService.getTaskOccurrence(
+        tenantId,
+        req.params.id
+      );
+
+      if (!currentOccurrence) {
+        return res.status(404).json({ success: false, message: 'Task occurrence not found' });
+      }
+
+      // Complete the task
+      const occurrence = await firestoreService.completeTaskOccurrence(
+        tenantId,
+        req.params.id,
+        { notes, actualDurationMinutes, inventoryConsumed },
+        req.firebaseUser.uid
+      );
+
+      // Create linked event if requested and template has linkedEventType
+      let linkedEvent = null;
+      if (createLinkedEvent && currentOccurrence.linkedEventType) {
+        try {
+          const idempotencyKey = accountingService.generateIdempotencyKey(
+            tenantId,
+            `task-${occurrence.id}`,
+            { completedAt: new Date().toISOString() }
+          );
+
+          linkedEvent = await firestoreService.createEvent(
+            tenantId,
+            {
+              siteId: occurrence.siteId,
+              type: currentOccurrence.linkedEventType,
+              occurredAt: new Date(),
+              sourceType: 'TASK',
+              sourceId: occurrence.id,
+              payload: {
+                taskOccurrenceId: occurrence.id,
+                animalGroupId: occurrence.animalGroupId,
+                animalIds: occurrence.animalIds,
+                inventoryConsumed: inventoryConsumed || [],
+                notes,
+              },
+              idempotencyKey,
+            },
+            req.firebaseUser.uid
+          );
+
+          // Update occurrence with linked event ID
+          await firestoreService.updateTaskOccurrence(tenantId, req.params.id, {
+            linkedEventId: linkedEvent.id,
+          });
+
+          // Process the event immediately
+          const lockerId = `task-${uuidv4()}`;
+          await accountingService.processEvent(tenantId, linkedEvent.id, lockerId);
+        } catch (eventError) {
+          console.error('Error creating linked event:', eventError);
+          // Don't fail the task completion, just log the error
+        }
+      }
+
+      res.json({
+        success: true,
+        data: { occurrence, linkedEvent },
+      });
+    } catch (error) {
+      console.error('Error completing task:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to complete task',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/occurrences/:id/skip
+ * Skip a task
+ */
+router.post(
+  '/occurrences/:id/skip',
+  [
+    param('id').notEmpty().withMessage('Occurrence ID is required'),
+    body('reason').notEmpty().withMessage('Reason is required'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const occurrence = await firestoreService.skipTaskOccurrence(
+        userData.tenantId,
+        req.params.id,
+        req.body.reason,
+        req.firebaseUser.uid
+      );
+
+      res.json({
+        success: true,
+        data: { occurrence },
+      });
+    } catch (error) {
+      console.error('Error skipping task:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to skip task',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/occurrences/:id/cancel
+ * Cancel a task
+ */
+router.post(
+  '/occurrences/:id/cancel',
+  [
+    param('id').notEmpty().withMessage('Occurrence ID is required'),
+    body('reason').optional().isString(),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const occurrence = await firestoreService.cancelTaskOccurrence(
+        userData.tenantId,
+        req.params.id,
+        req.body.reason,
+        req.firebaseUser.uid
+      );
+
+      res.json({
+        success: true,
+        data: { occurrence },
+      });
+    } catch (error) {
+      console.error('Error cancelling task:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to cancel task',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/occurrences/:id/reassign
+ * Reassign a task to another user
+ */
+router.post(
+  '/occurrences/:id/reassign',
+  [
+    param('id').notEmpty().withMessage('Occurrence ID is required'),
+    body('assignedToUserId').notEmpty().withMessage('New assignee ID is required'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role for reassigning
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to reassign tasks',
+        });
+      }
+
+      const occurrence = await firestoreService.reassignTaskOccurrence(
+        userData.tenantId,
+        req.params.id,
+        req.body.assignedToUserId
+      );
+
+      res.json({
+        success: true,
+        data: { occurrence },
+      });
+    } catch (error) {
+      console.error('Error reassigning task:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to reassign task',
+      });
+    }
+  }
+);
+
+// ============================================
+// TASK GENERATION
+// ============================================
+
+/**
+ * POST /api/tasks/generate
+ * Generate task occurrences for a date
+ */
+router.post(
+  '/generate',
+  [body('targetDate').notEmpty().withMessage('Target date is required')],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      // Check user has manager+ role
+      if (!['owner', 'admin', 'manager'].some((r) => userData.user.roles?.includes(r))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to generate tasks',
+        });
+      }
+
+      const { targetDate } = req.body;
+
+      const occurrences = await firestoreService.generateTaskOccurrencesForDate(
+        userData.tenantId,
+        new Date(targetDate),
+        req.firebaseUser.uid
+      );
+
+      res.json({
+        success: true,
+        data: {
+          generated: occurrences.length,
+          occurrences,
+        },
+      });
+    } catch (error) {
+      console.error('Error generating tasks:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to generate tasks',
+      });
+    }
+  }
+);
+
+// ============================================
+// STATISTICS
+// ============================================
+
+/**
+ * GET /api/tasks/stats
+ * Get task statistics
+ */
+router.get('/stats', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const { siteId, startDate, endDate, assignedToUserId } = req.query;
+
+    const stats = await firestoreService.getTaskStats(userData.tenantId, {
+      siteId,
+      startDate,
+      endDate,
+      assignedToUserId,
+    });
+
+    res.json({
+      success: true,
+      data: { stats },
+    });
+  } catch (error) {
+    console.error('Error fetching task stats:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch task statistics' });
+  }
+});
+
+// ============================================
+// METADATA
+// ============================================
+
+/**
+ * GET /api/tasks/categories
+ * Get available task categories
+ */
+router.get('/categories', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      categories: Object.entries(firestoreService.TaskCategory).map(([key, value]) => ({
+        value,
+        label: key.charAt(0) + key.slice(1).toLowerCase().replace(/_/g, ' '),
+      })),
+    },
+  });
+});
+
+/**
+ * GET /api/tasks/priorities
+ * Get available task priorities
+ */
+router.get('/priorities', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      priorities: Object.entries(firestoreService.TaskPriority).map(([key, value]) => ({
+        value,
+        label: key.charAt(0) + key.slice(1).toLowerCase(),
+      })),
+    },
+  });
+});
+
+/**
+ * GET /api/tasks/recurrence-patterns
+ * Get available recurrence patterns
+ */
+router.get('/recurrence-patterns', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      patterns: Object.entries(firestoreService.RecurrencePattern).map(([key, value]) => ({
+        value,
+        label: key.charAt(0) + key.slice(1).toLowerCase(),
+      })),
+    },
+  });
+});
+
+/**
+ * GET /api/tasks/statuses
+ * Get available task statuses
+ */
+router.get('/statuses', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      statuses: Object.entries(firestoreService.TaskOccurrenceStatus).map(([key, value]) => ({
+        value,
+        label: key.charAt(0) + key.slice(1).toLowerCase().replace(/_/g, ' '),
+      })),
+    },
+  });
+});
+
+module.exports = router;

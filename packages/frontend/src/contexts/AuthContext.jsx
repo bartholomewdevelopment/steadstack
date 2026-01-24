@@ -11,6 +11,8 @@ import {
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
 const AuthContext = createContext({});
 
 export const useAuth = () => useContext(AuthContext);
@@ -20,36 +22,53 @@ export function AuthProvider({ children }) {
   const [userProfile, setUserProfile] = useState(null); // MongoDB user data
   const [loading, setLoading] = useState(true);
 
-  // Sync user with backend
-  const syncUserWithBackend = async (firebaseUser, farmName = null) => {
+  // Sync user with backend (with retry logic)
+  const syncUserWithBackend = async (firebaseUser, farmName = null, retries = 3) => {
     if (!firebaseUser) {
       setUserProfile(null);
       return null;
     }
 
-    try {
-      const token = await firebaseUser.getIdToken();
-      const response = await fetch('/api/auth/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ farmName }),
-      });
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const token = await firebaseUser.getIdToken(true); // Force refresh token
+        console.log(`Auth sync attempt ${attempt}/${retries}`);
 
-      if (response.ok) {
-        const data = await response.json();
-        setUserProfile(data.data.user);
-        return data.data;
-      } else {
-        console.error('Failed to sync user with backend');
-        return null;
+        const response = await fetch(`${API_BASE_URL}/auth/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ farmName }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Auth sync successful:', data.data.user?.email);
+          setUserProfile(data.data.user);
+          return data.data;
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.error(`Sync failed (${response.status}):`, errorData);
+
+          // Don't retry on client errors (4xx) except 401 which might be token issue
+          if (response.status >= 400 && response.status < 500 && response.status !== 401) {
+            return null;
+          }
+        }
+      } catch (error) {
+        console.error(`User sync error (attempt ${attempt}):`, error);
       }
-    } catch (error) {
-      console.error('User sync error:', error);
-      return null;
+
+      // Wait before retry
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      }
     }
+
+    console.error('All sync attempts failed');
+    return null;
   };
 
   // Get user profile from backend
@@ -58,7 +77,7 @@ export function AuthProvider({ children }) {
 
     try {
       const token = await firebaseUser.getIdToken();
-      const response = await fetch('/api/auth/me', {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -139,7 +158,7 @@ export function AuthProvider({ children }) {
     // Also update in backend
     if (auth.currentUser) {
       const token = await auth.currentUser.getIdToken();
-      await fetch('/api/auth/me', {
+      await fetch(`${API_BASE_URL}/auth/me`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

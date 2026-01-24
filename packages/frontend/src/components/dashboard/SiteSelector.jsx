@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSite } from '../../contexts/SiteContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function SiteSelector() {
   const { sites, currentSite, loading, selectSite, createSite } = useSite();
+  const { userProfile, syncUserWithBackend, user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const dropdownRef = useRef(null);
@@ -19,10 +21,37 @@ export default function SiteSelector() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const [syncing, setSyncing] = useState(false);
+
+  const handleRetrySync = async () => {
+    setSyncing(true);
+    try {
+      await syncUserWithBackend(user);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="animate-pulse">
         <div className="h-10 bg-gray-200 rounded-lg"></div>
+      </div>
+    );
+  }
+
+  // Show sync error state if user is logged in but not synced
+  if (user && !userProfile?.tenant) {
+    return (
+      <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <p className="text-sm text-yellow-800 mb-2">Account sync required</p>
+        <button
+          onClick={handleRetrySync}
+          disabled={syncing}
+          className="text-sm text-yellow-700 hover:text-yellow-900 underline disabled:opacity-50"
+        >
+          {syncing ? 'Syncing...' : 'Retry sync'}
+        </button>
       </div>
     );
   }
@@ -70,18 +99,18 @@ export default function SiteSelector() {
             ) : (
               sites.map((site) => (
                 <button
-                  key={site._id}
+                  key={site.id}
                   onClick={() => {
                     selectSite(site);
                     setIsOpen(false);
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-gray-50 ${
-                    currentSite?._id === site._id ? 'bg-primary-50' : ''
+                    currentSite?.id === site.id ? 'bg-primary-50' : ''
                   }`}
                 >
                   <div
                     className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-medium ${
-                      currentSite?._id === site._id
+                      currentSite?.id === site.id
                         ? 'bg-primary-100 text-primary-600'
                         : 'bg-gray-100 text-gray-600'
                     }`}
@@ -96,7 +125,7 @@ export default function SiteSelector() {
                       <p className="text-xs text-gray-500">{site.acreage} acres</p>
                     )}
                   </div>
-                  {currentSite?._id === site._id && (
+                  {currentSite?.id === site.id && (
                     <svg className="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                     </svg>

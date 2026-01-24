@@ -1,31 +1,34 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
 const SiteContext = createContext({});
 
 export const useSite = () => useContext(SiteContext);
 
 export function SiteProvider({ children }) {
-  const { user, getIdToken } = useAuth();
+  const { user, userProfile, getIdToken } = useAuth();
   const [sites, setSites] = useState([]);
   const [currentSite, setCurrentSite] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch sites when user changes
+  // Fetch sites when userProfile changes (need MongoDB user with tenant)
   useEffect(() => {
-    if (user) {
+    if (user && userProfile?.tenant) {
       fetchSites();
     } else {
+      // No user OR user exists but no profile yet
       setSites([]);
       setCurrentSite(null);
       setLoading(false);
     }
-  }, [user]);
+  }, [user, userProfile]);
 
   const fetchSites = async () => {
     try {
       const token = await getIdToken();
-      const response = await fetch('/api/sites', {
+      const response = await fetch(`${API_BASE_URL}/sites`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -37,13 +40,13 @@ export function SiteProvider({ children }) {
 
         // Set current site from localStorage or first site
         const savedSiteId = localStorage.getItem('currentSiteId');
-        const savedSite = data.data.sites.find((s) => s._id === savedSiteId);
+        const savedSite = data.data.sites.find((s) => s.id === savedSiteId);
 
         if (savedSite) {
           setCurrentSite(savedSite);
         } else if (data.data.sites.length > 0) {
           setCurrentSite(data.data.sites[0]);
-          localStorage.setItem('currentSiteId', data.data.sites[0]._id);
+          localStorage.setItem('currentSiteId', data.data.sites[0].id);
         }
       }
     } catch (error) {
@@ -55,12 +58,16 @@ export function SiteProvider({ children }) {
 
   const selectSite = (site) => {
     setCurrentSite(site);
-    localStorage.setItem('currentSiteId', site._id);
+    localStorage.setItem('currentSiteId', site.id);
   };
 
   const createSite = async (siteData) => {
+    if (!userProfile?.tenant) {
+      throw new Error('User profile not ready. Please try again.');
+    }
+
     const token = await getIdToken();
-    const response = await fetch('/api/sites', {
+    const response = await fetch(`${API_BASE_URL}/sites`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -87,7 +94,7 @@ export function SiteProvider({ children }) {
 
   const updateSite = async (siteId, updates) => {
     const token = await getIdToken();
-    const response = await fetch(`/api/sites/${siteId}`, {
+    const response = await fetch(`${API_BASE_URL}/sites/${siteId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -103,10 +110,10 @@ export function SiteProvider({ children }) {
 
     const data = await response.json();
     setSites((prev) =>
-      prev.map((s) => (s._id === siteId ? data.data.site : s))
+      prev.map((s) => (s.id === siteId ? data.data.site : s))
     );
 
-    if (currentSite?._id === siteId) {
+    if (currentSite?.id === siteId) {
       setCurrentSite(data.data.site);
     }
 

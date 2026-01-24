@@ -1,0 +1,216 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Get user document for the authenticated user within a tenant
+    function getUserDoc(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
+    }
+
+    // Check if user belongs to a tenant
+    function isTenantMember(tenantId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
+    }
+
+    // Check if user has specific role(s) in tenant
+    function hasRole(tenantId, roles) {
+      let userDoc = getUserDoc(tenantId);
+      return userDoc != null && userDoc.data.roles.hasAny(roles);
+    }
+
+    // Check if user is owner or admin
+    function isAdmin(tenantId) {
+      return hasRole(tenantId, ['owner', 'admin']);
+    }
+
+    // Check if user is manager or above
+    function isManager(tenantId) {
+      return hasRole(tenantId, ['owner', 'admin', 'manager']);
+    }
+
+    // ============================================
+    // TENANT RULES
+    // ============================================
+
+    match /tenants/{tenantId} {
+      // Tenants can only be read by members
+      allow read: if isTenantMember(tenantId);
+
+      // Only admins can update tenant settings
+      allow update: if isAdmin(tenantId);
+
+      // Tenant creation is handled by backend (admin SDK)
+      allow create, delete: if false;
+
+      // ============================================
+      // USERS SUBCOLLECTION
+      // ============================================
+      match /users/{userId} {
+        // Users can read their own doc or admins can read any user in tenant
+        allow read: if isTenantMember(tenantId);
+
+        // Users can update their own non-role fields
+        allow update: if request.auth.uid == userId
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['roles', 'sitePermissions']);
+
+        // Only admins can create/delete users or change roles
+        allow create, delete: if isAdmin(tenantId);
+        allow update: if isAdmin(tenantId);
+      }
+
+      // ============================================
+      // SITES SUBCOLLECTION
+      // ============================================
+      match /sites/{siteId} {
+        // All tenant members can read sites
+        allow read: if isTenantMember(tenantId);
+
+        // Only admins can create/update/delete sites
+        allow create, update, delete: if isAdmin(tenantId);
+
+        // Site-level inventory balances
+        match /inventory/{itemId} {
+          allow read: if isTenantMember(tenantId);
+          // Balances are managed by the posting engine (admin SDK)
+          allow create, update, delete: if false;
+        }
+      }
+
+      // ============================================
+      // EVENTS SUBCOLLECTION
+      // ============================================
+      match /events/{eventId} {
+        // All tenant members can read events
+        allow read: if isTenantMember(tenantId);
+
+        // Workers and above can create events
+        allow create: if isTenantMember(tenantId);
+
+        // Only the posting engine (admin SDK) can update events
+        // This ensures only the backend can transition PENDING -> POSTED/FAILED
+        allow update: if false;
+
+        // Only managers can delete events (soft delete via status change is preferred)
+        allow delete: if isManager(tenantId);
+      }
+
+      // ============================================
+      // TASK TEMPLATES SUBCOLLECTION
+      // ============================================
+      match /taskTemplates/{templateId} {
+        allow read: if isTenantMember(tenantId);
+        allow create, update, delete: if isAdmin(tenantId);
+      }
+
+      // ============================================
+      // RUNLISTS SUBCOLLECTION
+      // ============================================
+      match /runlists/{runlistId} {
+        allow read: if isTenantMember(tenantId);
+        allow create, update, delete: if isManager(tenantId);
+      }
+
+      // ============================================
+      // TASK OCCURRENCES SUBCOLLECTION
+      // ============================================
+      match /taskOccurrences/{occurrenceId} {
+        allow read: if isTenantMember(tenantId);
+
+        // Workers can update their assigned tasks
+        allow update: if isTenantMember(tenantId)
+          && resource.data.assignedToUserId == request.auth.uid;
+
+        // Managers can update any task occurrence
+        allow update: if isManager(tenantId);
+
+        // Only system/managers can create task occurrences
+        allow create: if isManager(tenantId);
+
+        // Only admins can delete
+        allow delete: if isAdmin(tenantId);
+      }
+
+      // ============================================
+      // INVENTORY ITEMS SUBCOLLECTION
+      // ============================================
+      match /inventoryItems/{itemId} {
+        allow read: if isTenantMember(tenantId);
+        allow create, update: if isManager(tenantId);
+        allow delete: if isAdmin(tenantId);
+      }
+
+      // ============================================
+      // INVENTORY MOVEMENTS SUBCOLLECTION
+      // ============================================
+      match /inventoryMovements/{movementId} {
+        allow read: if isTenantMember(tenantId);
+
+        // Movements are created by the posting engine
+        allow create, update, delete: if false;
+      }
+
+      // ============================================
+      // INVENTORY BALANCES SUBCOLLECTION
+      // ============================================
+      match /inventoryBalances/{balanceId} {
+        allow read: if isTenantMember(tenantId);
+
+        // Balances are managed by the posting engine
+        allow create, update, delete: if false;
+      }
+
+      // ============================================
+      // PURCHASE REQUISITIONS SUBCOLLECTION
+      // ============================================
+      match /purchaseRequisitions/{reqId} {
+        allow read: if isTenantMember(tenantId);
+        allow create: if isTenantMember(tenantId);
+        allow update: if isManager(tenantId);
+        allow delete: if isAdmin(tenantId);
+      }
+
+      // ============================================
+      // PURCHASE ORDERS SUBCOLLECTION
+      // ============================================
+      match /purchaseOrders/{poId} {
+        allow read: if isTenantMember(tenantId);
+        allow create, update: if isManager(tenantId);
+        allow delete: if isAdmin(tenantId);
+      }
+
+      // ============================================
+      // ANIMAL GROUPS SUBCOLLECTION
+      // ============================================
+      match /animalGroups/{groupId} {
+        allow read: if isTenantMember(tenantId);
+        allow create, update: if isTenantMember(tenantId);
+        allow delete: if isManager(tenantId);
+      }
+
+      // ============================================
+      // ANIMALS SUBCOLLECTION
+      // ============================================
+      match /animals/{animalId} {
+        allow read: if isTenantMember(tenantId);
+        allow create, update: if isTenantMember(tenantId);
+        allow delete: if isManager(tenantId);
+      }
+    }
+
+    // ============================================
+    // DENY ALL OTHER ACCESS
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
