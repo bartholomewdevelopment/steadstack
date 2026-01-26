@@ -18,7 +18,7 @@ const moduleInfo = {
     ],
   },
   animals: {
-    title: 'Animals',
+    title: 'Livestock',
     description: 'Manage your livestock with detailed records for each animal. Track health, breeding, lineage, and more.',
     icon: (
       <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" strokeWidth="1" stroke="currentColor">

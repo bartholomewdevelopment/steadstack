@@ -33,12 +33,40 @@ const siteSchema = new mongoose.Schema(
       zipCode: String,
       country: { type: String, default: 'USA' },
     },
-    // GPS coordinates for mapping
+    // GPS coordinates for map centering
     coordinates: {
       latitude: Number,
       longitude: Number,
     },
-    // Site size
+    // Boundary polygon (GeoJSON format)
+    boundaryGeometry: {
+      type: {
+        type: String,
+        enum: ['Polygon'],
+      },
+      coordinates: {
+        type: [[[Number]]], // Array of array of [lng, lat] pairs
+      },
+    },
+    // Computed from boundary
+    boundaryAreaSqMeters: {
+      type: Number,
+      min: 0,
+    },
+    boundaryAreaAcres: {
+      type: Number,
+      min: 0,
+    },
+    boundaryCentroid: {
+      lat: Number,
+      lng: Number,
+    },
+    // User acknowledged site represents one connected tract
+    connectedLandRuleAccepted: {
+      type: Boolean,
+      default: false,
+    },
+    // Legacy manual acreage (deprecated - use boundaryAreaAcres)
     acreage: {
       type: Number,
       min: 0,
@@ -51,8 +79,8 @@ const siteSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'inactive', 'archived'],
-      default: 'active',
+      enum: ['draft', 'active', 'inactive', 'archived'],
+      default: 'draft',
     },
     // Site-specific settings
     settings: {

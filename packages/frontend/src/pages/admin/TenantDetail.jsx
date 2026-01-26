@@ -12,7 +12,6 @@ const statusColors = {
 const planColors = {
   starter: 'bg-gray-100 text-gray-700',
   professional: 'bg-blue-100 text-blue-700',
-  enterprise: 'bg-purple-100 text-purple-700',
 };
 
 export default function TenantDetail() {
@@ -145,7 +144,7 @@ export default function TenantDetail() {
           <div className="flex items-center gap-3 mt-2">
             <span className="text-gray-500">{tenant.slug}</span>
             <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full capitalize ${planColors[tenant.plan]}`}>
-              {tenant.plan}
+              {tenant.plan === 'starter' ? 'Free' : 'Full Access'}
             </span>
             <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full capitalize ${statusColors[tenant.status]}`}>
               {tenant.status}
@@ -309,9 +308,8 @@ export default function TenantDetail() {
                   onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}
                   className="input"
                 >
-                  <option value="starter">Starter</option>
-                  <option value="professional">Professional</option>
-                  <option value="enterprise">Enterprise</option>
+                  <option value="starter">Free</option>
+                  <option value="professional">Full Access</option>
                 </select>
               </div>
 

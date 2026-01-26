@@ -16,7 +16,7 @@ router.use(verifyToken);
 
 /**
  * GET /api/inventory/items
- * List all inventory items for the tenant
+ * List all inventory items for the tenant with aggregated quantities
  */
 router.get('/items', async (req, res) => {
   try {
@@ -25,16 +25,67 @@ router.get('/items', async (req, res) => {
       return res.status(403).json({ success: false, message: 'User not found' });
     }
 
-    const { category, activeOnly } = req.query;
+    const { category, activeOnly, siteId, page = 1, limit = 50 } = req.query;
+    const { tenantId } = userData;
 
-    const items = await firestoreService.getInventoryItems(userData.tenantId, {
+    const items = await firestoreService.getInventoryItems(tenantId, {
       category,
       activeOnly: activeOnly !== 'false',
     });
 
+    // Get all sites for the tenant to aggregate quantities
+    const sites = await firestoreService.getSites(tenantId);
+
+    // Enrich items with aggregated qtyOnHand from site balances
+    const enrichedItems = await Promise.all(
+      items.map(async (item) => {
+        let totalQtyOnHand = 0;
+        const siteBalances = [];
+
+        if (siteId) {
+          // If siteId provided, get balance for that specific site
+          const balance = await firestoreService.getSiteInventoryBalance(tenantId, siteId, item.id);
+          totalQtyOnHand = balance.qtyOnHand || 0;
+          if (balance.qtyOnHand > 0) {
+            siteBalances.push({ siteId, qtyOnHand: balance.qtyOnHand, avgCostPerUnit: balance.avgCostPerUnit });
+          }
+        } else {
+          // Aggregate across all sites
+          for (const site of sites) {
+            const balance = await firestoreService.getSiteInventoryBalance(tenantId, site.id, item.id);
+            if (balance.qtyOnHand > 0) {
+              totalQtyOnHand += balance.qtyOnHand;
+              siteBalances.push({ siteId: site.id, siteName: site.name, qtyOnHand: balance.qtyOnHand, avgCostPerUnit: balance.avgCostPerUnit });
+            }
+          }
+        }
+
+        return {
+          ...item,
+          qtyOnHand: totalQtyOnHand,
+          siteBalances: siteBalances.length > 0 ? siteBalances : undefined,
+        };
+      })
+    );
+
+    // Simple pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const startIdx = (pageNum - 1) * limitNum;
+    const paginatedItems = enrichedItems.slice(startIdx, startIdx + limitNum);
+    const totalPages = Math.ceil(enrichedItems.length / limitNum);
+
     res.json({
       success: true,
-      data: { items },
+      data: {
+        items: paginatedItems,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: enrichedItems.length,
+          pages: totalPages,
+        },
+      },
     });
   } catch (error) {
     console.error('Error fetching inventory items:', error);

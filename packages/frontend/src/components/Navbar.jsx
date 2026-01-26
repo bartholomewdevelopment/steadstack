@@ -107,7 +107,7 @@ export default function Navbar() {
                   Sign in
                 </Link>
                 <Link to="/signup" className="btn-primary">
-                  Start Free Trial
+                  Start Free
                 </Link>
               </>
             )}
@@ -210,7 +210,7 @@ export default function Navbar() {
                     onClick={() => setMobileMenuOpen(false)}
                     className="btn-primary text-center"
                   >
-                    Start Free Trial
+                    Start Free
                   </Link>
                 </>
               )}

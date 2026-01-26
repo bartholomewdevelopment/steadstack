@@ -34,31 +34,13 @@ export default function DashboardHeader({ onMenuClick }) {
 
         {/* Right side - tenant info and quick actions */}
         <div className="flex items-center gap-4">
-          {/* Tenant/Plan info */}
+          {/* Tenant name */}
           {userProfile?.tenant && (
-            <div className="hidden md:flex items-center gap-2 text-sm">
+            <div className="hidden md:flex items-center text-sm">
               <span className="text-gray-500">{userProfile.tenant.name}</span>
-              <span className="px-2 py-0.5 bg-primary-100 text-primary-700 rounded-full text-xs font-medium capitalize">
-                {userProfile.tenant.plan}
-              </span>
             </div>
           )}
 
-          {/* Quick action - add button */}
-          <button className="p-2 rounded-lg text-gray-600 hover:bg-gray-100" title="Quick add">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-          </button>
-
-          {/* Notifications */}
-          <button className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 relative" title="Notifications">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-            </svg>
-            {/* Notification badge */}
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-          </button>
         </div>
       </div>
     </header>

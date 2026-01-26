@@ -93,25 +93,31 @@ const upsertUser = async (tenantId, userData) => {
   const existingUser = await userRef.get();
 
   if (existingUser.exists) {
-    // Update existing user
-    await userRef.update({
+    // Update existing user - only include defined values
+    const updateData = {
       email,
       displayName,
-      photoURL,
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+    if (photoURL !== undefined) {
+      updateData.photoURL = photoURL;
+    }
+    await userRef.update(updateData);
   } else {
-    // Create new user
-    await userRef.set({
+    // Create new user - only include defined values
+    const newUserData = {
       authUid,
       email,
       displayName,
-      photoURL,
       roles,
       sitePermissions: [], // Empty = access to all sites
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+    if (photoURL !== undefined) {
+      newUserData.photoURL = photoURL;
+    }
+    await userRef.set(newUserData);
   }
 
   const userDoc = await userRef.get();
@@ -493,19 +499,17 @@ const createInventoryItem = async (tenantId, itemData, createdBy) => {
     glAccountCode,
   } = itemData;
 
-  // Check for duplicate SKU only if SKU is provided
-  if (sku) {
-    const existingItem = await db
-      .collection('tenants')
-      .doc(tenantId)
-      .collection('inventoryItems')
-      .where('sku', '==', sku.toUpperCase())
-      .limit(1)
-      .get();
+  // Check for duplicate SKU
+  const existingItem = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('inventoryItems')
+    .where('sku', '==', sku.toUpperCase())
+    .limit(1)
+    .get();
 
-    if (!existingItem.empty) {
-      throw new Error(`Inventory item with SKU "${sku}" already exists`);
-    }
+  if (!existingItem.empty) {
+    throw new Error(`Inventory item with SKU "${sku}" already exists`);
   }
 
   const itemRef = db
@@ -515,7 +519,7 @@ const createInventoryItem = async (tenantId, itemData, createdBy) => {
     .doc();
 
   const item = {
-    sku: sku ? sku.toUpperCase() : null,
+    sku: sku.toUpperCase(),
     name,
     description: description || null,
     category: category || InventoryCategory.OTHER,
@@ -1185,29 +1189,12 @@ const getAnimalGroups = async (tenantId, options = {}) => {
     query = query.where('species', '==', species);
   }
 
-  // Only use orderBy in Firestore if we have a simple query (status only)
-  // For compound queries with siteId/species, sort in JavaScript to avoid
-  // needing composite indexes for every combination
-  const needsJsSort = siteId || species;
+  const snapshot = await query.orderBy('name').get();
 
-  let snapshot;
-  if (needsJsSort) {
-    snapshot = await query.get();
-  } else {
-    snapshot = await query.orderBy('name').get();
-  }
-
-  const groups = snapshot.docs.map((doc) => ({
+  return snapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data(),
   }));
-
-  // Sort by name in JavaScript if we couldn't do it in Firestore
-  if (needsJsSort) {
-    groups.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }
-
-  return groups;
 };
 
 /**
@@ -2226,6 +2213,18 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     animalIds,
     inventoryItems,
     linkedEventId,
+    // Event fields (for major tasks)
+    isEvent,
+    eventType,
+    totalCost,
+    totalRevenue,
+    inventoryUsed,
+    inventoryReceived,
+    labor,
+    vendor,
+    // Override name/description for ad-hoc tasks
+    name: customName,
+    description: customDescription,
   } = occurrenceData;
 
   // Get template for defaults
@@ -2244,8 +2243,8 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     templateId: templateId || null,
     runlistId: runlistId || null,
     siteId: siteId || template?.siteIds?.[0] || null,
-    name: template?.name || 'Ad-hoc Task',
-    description: template?.description || null,
+    name: customName || template?.name || 'Ad-hoc Task',
+    description: customDescription || template?.description || null,
     category: template?.category || TaskCategory.OTHER,
     instructions: template?.instructions || null,
     status: TaskOccurrenceStatus.SCHEDULED,
@@ -2263,6 +2262,19 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     inventoryConsumed: [], // Filled in upon completion
     linkedEventId: linkedEventId || null,
     linkedEventType: template?.linkedEventType || null,
+    // Event fields (for major tasks/events)
+    isEvent: isEvent || false,
+    eventType: eventType || null, // feeding, treatment, purchase, sale, maintenance, labor, breeding, birth, death, harvest, custom
+    totalCost: totalCost || 0,
+    totalRevenue: totalRevenue || 0,
+    inventoryUsed: inventoryUsed || [], // [{itemId, itemName, quantity, unit, unitCost, totalCost}]
+    inventoryReceived: inventoryReceived || [], // For purchases
+    labor: labor || null, // {hours, rate, workerId, workerName, totalCost}
+    vendor: vendor || null, // {name, invoiceNumber}
+    posted: false,
+    postedAt: null,
+    ledgerTransactionId: null,
+    // Standard fields
     startedAt: null,
     completedAt: null,
     completedBy: null,
@@ -2428,6 +2440,15 @@ const completeTaskOccurrence = async (tenantId, occurrenceId, completionData, us
     notes,
     actualDurationMinutes,
     inventoryConsumed,
+    // Event completion fields
+    isEvent,
+    eventType,
+    totalCost,
+    totalRevenue,
+    inventoryUsed,
+    inventoryReceived,
+    labor,
+    vendor,
   } = completionData;
 
   const occurrence = await getTaskOccurrence(tenantId, occurrenceId);
@@ -2451,14 +2472,27 @@ const completeTaskOccurrence = async (tenantId, occurrenceId, completionData, us
     duration = Math.round((Date.now() - startTime.getTime()) / 60000);
   }
 
-  return updateTaskOccurrence(tenantId, occurrenceId, {
+  // Build update object
+  const updateData = {
     status: TaskOccurrenceStatus.COMPLETED,
     completedAt: FieldValue.serverTimestamp(),
     completedBy: userId,
     completionNotes: notes || null,
     actualDurationMinutes: duration || occurrence.estimatedDurationMinutes,
     inventoryConsumed: inventoryConsumed || [],
-  });
+  };
+
+  // Add event data if provided (can be added at creation or completion time)
+  if (isEvent !== undefined) updateData.isEvent = isEvent;
+  if (eventType !== undefined) updateData.eventType = eventType;
+  if (totalCost !== undefined) updateData.totalCost = totalCost;
+  if (totalRevenue !== undefined) updateData.totalRevenue = totalRevenue;
+  if (inventoryUsed !== undefined) updateData.inventoryUsed = inventoryUsed;
+  if (inventoryReceived !== undefined) updateData.inventoryReceived = inventoryReceived;
+  if (labor !== undefined) updateData.labor = labor;
+  if (vendor !== undefined) updateData.vendor = vendor;
+
+  return updateTaskOccurrence(tenantId, occurrenceId, updateData);
 };
 
 /**
@@ -2810,6 +2844,560 @@ const getTodaysTasks = async (tenantId, options = {}) => {
   });
 };
 
+// ============================================
+// ASSET REGISTRY OPERATIONS
+// ============================================
+
+/**
+ * Get assets for a tenant with optional filters
+ */
+const getAssets = async (tenantId, options = {}) => {
+  const { assetType, siteId, status, skipOrder = false } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('assets');
+
+  if (assetType) {
+    query = query.where('assetType', '==', assetType);
+  }
+
+  if (siteId) {
+    query = query.where('siteId', '==', siteId);
+  }
+
+  if (status) {
+    query = query.where('status', '==', status);
+  }
+
+  // Only add orderBy if not skipping (requires composite indexes)
+  if (!skipOrder) {
+    query = query.orderBy('updatedAt', 'desc');
+  }
+
+  const snapshot = await query.get();
+
+  let results = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort client-side if we skipped orderBy
+  if (skipOrder) {
+    results.sort((a, b) => {
+      const aTime = a.updatedAt?.toDate?.() || a.updatedAt || 0;
+      const bTime = b.updatedAt?.toDate?.() || b.updatedAt || 0;
+      return bTime - aTime;
+    });
+  }
+
+  return results;
+};
+
+/**
+ * Get a single asset
+ */
+const getAsset = async (tenantId, assetId) => {
+  const assetDoc = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('assets')
+    .doc(assetId)
+    .get();
+
+  if (!assetDoc.exists) {
+    return null;
+  }
+
+  return {
+    id: assetDoc.id,
+    ...assetDoc.data(),
+  };
+};
+
+/**
+ * Create a new asset
+ */
+const createAsset = async (tenantId, assetData) => {
+  const assetRef = db.collection('tenants').doc(tenantId).collection('assets').doc();
+
+  const asset = {
+    ...assetData,
+    tenantId,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await assetRef.set(asset);
+
+  return {
+    id: assetRef.id,
+    ...asset,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+};
+
+/**
+ * Update an asset
+ */
+const updateAsset = async (tenantId, assetId, updates) => {
+  const assetRef = db.collection('tenants').doc(tenantId).collection('assets').doc(assetId);
+
+  // Remove undefined values
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([_, v]) => v !== undefined)
+  );
+
+  await assetRef.update({
+    ...cleanUpdates,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return getAsset(tenantId, assetId);
+};
+
+/**
+ * Get recently updated assets
+ */
+const getRecentAssets = async (tenantId, options = {}) => {
+  const { siteId, limit = 10 } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('assets');
+
+  // When filtering by siteId, we need a composite index. Use client-side sorting instead.
+  if (siteId) {
+    query = query.where('siteId', '==', siteId);
+    const snapshot = await query.get();
+
+    let results = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    // Sort client-side and limit
+    results.sort((a, b) => {
+      const aTime = a.updatedAt?.toDate?.() || a.updatedAt || 0;
+      const bTime = b.updatedAt?.toDate?.() || b.updatedAt || 0;
+      return bTime - aTime;
+    });
+
+    return results.slice(0, parseInt(limit));
+  }
+
+  // Without siteId filter, we can use orderBy directly
+  const snapshot = await query
+    .orderBy('updatedAt', 'desc')
+    .limit(parseInt(limit))
+    .get();
+
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+};
+
+/**
+ * Search assets by name, identifier, or tags
+ */
+const searchAssets = async (tenantId, options = {}) => {
+  const { query: searchQuery, siteId, limit = 20 } = options;
+
+  if (!searchQuery || searchQuery.length < 2) {
+    return [];
+  }
+
+  const searchLower = searchQuery.toLowerCase();
+
+  // Get all assets and filter client-side (Firestore doesn't support full-text search)
+  let query = db.collection('tenants').doc(tenantId).collection('assets');
+
+  if (siteId) {
+    query = query.where('siteId', '==', siteId);
+  }
+
+  const snapshot = await query.get();
+
+  const results = snapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
+    .filter(asset =>
+      asset.name?.toLowerCase().includes(searchLower) ||
+      asset.identifier?.toLowerCase().includes(searchLower) ||
+      (asset.tags || []).some(tag => tag.toLowerCase().includes(searchLower))
+    )
+    .slice(0, parseInt(limit));
+
+  return results;
+};
+
+// ============================================
+// VEHICLE OPERATIONS
+// ============================================
+
+/**
+ * Get vehicles for a tenant with optional filters
+ */
+const getVehicles = async (tenantId, options = {}) => {
+  const { siteId, status, vehicleType } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('vehicles');
+
+  // Firestore requires composite indexes for where + orderBy
+  // Use client-side sorting to avoid index requirements
+  if (siteId) {
+    query = query.where('siteId', '==', siteId);
+  }
+
+  if (vehicleType) {
+    query = query.where('vehicleType', '==', vehicleType);
+  }
+
+  const snapshot = await query.get();
+
+  let vehicles = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort by createdAt client-side
+  vehicles.sort((a, b) => {
+    const aTime = a.createdAt?.toDate?.() || a.createdAt || 0;
+    const bTime = b.createdAt?.toDate?.() || b.createdAt || 0;
+    return bTime - aTime;
+  });
+
+  // Filter by status if provided
+  if (status) {
+    vehicles = vehicles.filter(v => v.status === status);
+  }
+
+  return vehicles;
+};
+
+/**
+ * Get a single vehicle
+ */
+const getVehicle = async (tenantId, vehicleId) => {
+  const vehicleDoc = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('vehicles')
+    .doc(vehicleId)
+    .get();
+
+  if (!vehicleDoc.exists) {
+    return null;
+  }
+
+  return {
+    id: vehicleDoc.id,
+    ...vehicleDoc.data(),
+  };
+};
+
+/**
+ * Create a vehicle with its asset record atomically
+ */
+const createVehicleWithAsset = async (tenantId, { asset: assetData, vehicle: vehicleData }) => {
+  const batch = db.batch();
+
+  // Generate ID for both (same ID)
+  const assetRef = db.collection('tenants').doc(tenantId).collection('assets').doc();
+  const vehicleRef = db.collection('tenants').doc(tenantId).collection('vehicles').doc(assetRef.id);
+
+  // Create asset
+  const asset = {
+    ...assetData,
+    tenantId,
+    assetType: 'VEHICLE',
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  batch.set(assetRef, asset);
+
+  // Create vehicle
+  const vehicle = {
+    ...vehicleData,
+    tenantId,
+    assetId: assetRef.id,
+    status: assetData.status || 'ACTIVE',
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  batch.set(vehicleRef, vehicle);
+
+  await batch.commit();
+
+  return {
+    assetId: assetRef.id,
+    vehicleId: assetRef.id,
+    asset: { id: assetRef.id, ...asset },
+    vehicle: { id: assetRef.id, ...vehicle },
+  };
+};
+
+/**
+ * Update a vehicle record
+ */
+const updateVehicle = async (tenantId, vehicleId, updates) => {
+  const vehicleRef = db.collection('tenants').doc(tenantId).collection('vehicles').doc(vehicleId);
+
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([_, v]) => v !== undefined)
+  );
+
+  await vehicleRef.update({
+    ...cleanUpdates,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return getVehicle(tenantId, vehicleId);
+};
+
+/**
+ * Update a vehicle and its asset record atomically
+ */
+const updateVehicleWithAsset = async (tenantId, vehicleId, { asset: assetUpdates, vehicle: vehicleUpdates }) => {
+  const batch = db.batch();
+
+  // Get vehicle to find asset ID
+  const existingVehicle = await getVehicle(tenantId, vehicleId);
+  if (!existingVehicle) {
+    throw new Error('Vehicle not found');
+  }
+
+  const assetId = existingVehicle.assetId || vehicleId;
+
+  // Update asset
+  if (assetUpdates && Object.keys(assetUpdates).length > 0) {
+    const assetRef = db.collection('tenants').doc(tenantId).collection('assets').doc(assetId);
+    const cleanAssetUpdates = Object.fromEntries(
+      Object.entries(assetUpdates).filter(([_, v]) => v !== undefined)
+    );
+    batch.update(assetRef, {
+      ...cleanAssetUpdates,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+
+  // Update vehicle
+  if (vehicleUpdates && Object.keys(vehicleUpdates).length > 0) {
+    const vehicleRef = db.collection('tenants').doc(tenantId).collection('vehicles').doc(vehicleId);
+    const cleanVehicleUpdates = Object.fromEntries(
+      Object.entries(vehicleUpdates).filter(([_, v]) => v !== undefined)
+    );
+    batch.update(vehicleRef, {
+      ...cleanVehicleUpdates,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+
+  await batch.commit();
+
+  return {
+    asset: await getAsset(tenantId, assetId),
+    vehicle: await getVehicle(tenantId, vehicleId),
+  };
+};
+
+// ============================================
+// LAND TRACTS OPERATIONS
+// ============================================
+
+/**
+ * Land tract types
+ */
+const LandType = {
+  PARCEL: 'PARCEL',
+  FIELD: 'FIELD',
+  PASTURE: 'PASTURE',
+  INFRASTRUCTURE: 'INFRASTRUCTURE',
+  OTHER: 'OTHER',
+};
+
+/**
+ * Get land tracts for a tenant with optional filters
+ */
+const getLandTracts = async (tenantId, options = {}) => {
+  const { siteId, type, status = 'active' } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('landTracts');
+
+  if (siteId) {
+    query = query.where('siteId', '==', siteId);
+  }
+
+  if (type) {
+    query = query.where('type', '==', type);
+  }
+
+  if (status) {
+    query = query.where('status', '==', status);
+  }
+
+  const snapshot = await query.get();
+
+  let results = snapshot.docs.map(doc => {
+    const data = doc.data();
+    // Parse geometryJson back to geometry object
+    if (data.geometryJson) {
+      data.geometry = JSON.parse(data.geometryJson);
+      delete data.geometryJson;
+    }
+    return {
+      id: doc.id,
+      ...data,
+    };
+  });
+
+  // Sort by name client-side
+  results.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  return results;
+};
+
+/**
+ * Get a single land tract
+ */
+const getLandTract = async (tenantId, tractId) => {
+  const tractDoc = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('landTracts')
+    .doc(tractId)
+    .get();
+
+  if (!tractDoc.exists) {
+    return null;
+  }
+
+  const data = tractDoc.data();
+
+  // Parse geometryJson back to geometry object
+  if (data.geometryJson) {
+    data.geometry = JSON.parse(data.geometryJson);
+    delete data.geometryJson;
+  }
+
+  return {
+    id: tractDoc.id,
+    ...data,
+  };
+};
+
+/**
+ * Create a new land tract
+ */
+const createLandTract = async (tenantId, tractData) => {
+  const tractRef = db.collection('tenants').doc(tenantId).collection('landTracts').doc();
+
+  // Remove undefined values to prevent Firestore errors
+  const cleanTractData = Object.fromEntries(
+    Object.entries(tractData).filter(([_, v]) => v !== undefined)
+  );
+
+  // Firestore doesn't support deeply nested arrays, so store geometry as JSON string
+  let geometryForResponse = null;
+  if (cleanTractData.geometry) {
+    geometryForResponse = cleanTractData.geometry;
+    cleanTractData.geometryJson = JSON.stringify(cleanTractData.geometry);
+    delete cleanTractData.geometry;
+  }
+
+  const tract = {
+    ...cleanTractData,
+    tenantId,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await tractRef.set(tract);
+
+  return {
+    id: tractRef.id,
+    ...tract,
+    geometry: geometryForResponse, // Return parsed geometry
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+};
+
+/**
+ * Update a land tract
+ */
+const updateLandTract = async (tenantId, tractId, updates) => {
+  const tractRef = db.collection('tenants').doc(tenantId).collection('landTracts').doc(tractId);
+
+  // Remove undefined values
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([_, v]) => v !== undefined)
+  );
+
+  // Convert geometry to JSON string if provided
+  if (cleanUpdates.geometry) {
+    cleanUpdates.geometryJson = JSON.stringify(cleanUpdates.geometry);
+    delete cleanUpdates.geometry;
+  }
+
+  await tractRef.update({
+    ...cleanUpdates,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return getLandTract(tenantId, tractId);
+};
+
+/**
+ * Get land tract statistics
+ */
+const getLandTractStats = async (tenantId, options = {}) => {
+  const { siteId } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('landTracts');
+
+  if (siteId) {
+    query = query.where('siteId', '==', siteId);
+  }
+
+  const snapshot = await query.get();
+
+  const stats = {
+    total: 0,
+    active: 0,
+    archived: 0,
+    totalAcres: 0,
+    byType: {},
+  };
+
+  // Initialize byType
+  Object.values(LandType).forEach(type => {
+    stats.byType[type] = { count: 0, acres: 0 };
+  });
+
+  snapshot.docs.forEach(doc => {
+    const data = doc.data();
+    stats.total++;
+
+    if (data.status === 'active') {
+      stats.active++;
+      stats.totalAcres += data.areaAcres || 0;
+
+      if (data.type && stats.byType[data.type]) {
+        stats.byType[data.type].count++;
+        stats.byType[data.type].acres += data.areaAcres || 0;
+      }
+    } else {
+      stats.archived++;
+    }
+  });
+
+  // Round acres
+  stats.totalAcres = Math.round(stats.totalAcres * 100) / 100;
+  Object.values(stats.byType).forEach(t => {
+    t.acres = Math.round(t.acres * 100) / 100;
+  });
+
+  return stats;
+};
+
 module.exports = {
   // Tenant
   createTenant,
@@ -2925,4 +3513,27 @@ module.exports = {
   checkRecurrenceMatch,
   getUpcomingTasks,
   getTodaysTasks,
+
+  // Assets
+  getAssets,
+  getAsset,
+  createAsset,
+  updateAsset,
+  getRecentAssets,
+  searchAssets,
+
+  // Vehicles
+  getVehicles,
+  getVehicle,
+  createVehicleWithAsset,
+  updateVehicle,
+  updateVehicleWithAsset,
+
+  // Land Tracts
+  LandType,
+  getLandTracts,
+  getLandTract,
+  createLandTract,
+  updateLandTract,
+  getLandTractStats,
 };

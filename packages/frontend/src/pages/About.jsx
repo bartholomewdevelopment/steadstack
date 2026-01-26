@@ -165,7 +165,7 @@ export default function About() {
               Get in Touch
             </Link>
             <Link to="/signup" className="btn border-2 border-white text-white hover:bg-primary-700 btn-lg">
-              Start Free Trial
+              Start Free
             </Link>
           </div>
         </div>

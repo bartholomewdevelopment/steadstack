@@ -150,7 +150,7 @@ export default function AnimalDetail() {
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
           <p className="text-red-600">{error}</p>
           <Link to="/app/animals" className="mt-4 inline-block text-red-600 hover:text-red-700">
-            Back to Animals
+            Back to Livestock
           </Link>
         </div>
       </div>
@@ -171,7 +171,7 @@ export default function AnimalDetail() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
             </svg>
-            Back to Animals
+            Back to Livestock
           </Link>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center text-3xl">

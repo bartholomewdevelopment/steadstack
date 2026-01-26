@@ -407,7 +407,7 @@ export default function EventForm() {
                 {formData.animalGroupId && (
                   <div className="flex items-end">
                     <div className="bg-white rounded-lg px-4 py-2 border border-blue-200">
-                      <p className="text-sm text-gray-500">Animals in group</p>
+                      <p className="text-sm text-gray-500">Livestock in group</p>
                       <p className="text-2xl font-bold text-blue-600">{formData.animalCount}</p>
                     </div>
                   </div>

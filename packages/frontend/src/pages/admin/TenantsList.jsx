@@ -12,7 +12,6 @@ const statusColors = {
 const planColors = {
   starter: 'bg-gray-100 text-gray-700',
   professional: 'bg-blue-100 text-blue-700',
-  enterprise: 'bg-purple-100 text-purple-700',
 };
 
 export default function TenantsList() {
@@ -113,9 +112,8 @@ export default function TenantsList() {
               className="input py-2 min-w-[150px]"
             >
               <option value="">All Plans</option>
-              <option value="starter">Starter</option>
-              <option value="professional">Professional</option>
-              <option value="enterprise">Enterprise</option>
+              <option value="starter">Free</option>
+              <option value="professional">Full Access</option>
             </select>
           </div>
         </div>
@@ -175,7 +173,7 @@ export default function TenantsList() {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full capitalize ${planColors[tenant.plan]}`}>
-                        {tenant.plan}
+                        {tenant.plan === 'starter' ? 'Free' : 'Full Access'}
                       </span>
                     </td>
                     <td className="px-6 py-4">

@@ -188,7 +188,9 @@ export default function UsersList() {
                       {user.tenantId ? (
                         <div>
                           <p className="text-sm font-medium text-gray-900">{user.tenantId.name}</p>
-                          <p className="text-xs text-gray-500 capitalize">{user.tenantId.plan}</p>
+                          <p className="text-xs text-gray-500">
+                            {user.tenantId.plan === 'starter' ? 'Free' : 'Full Access'}
+                          </p>
                         </div>
                       ) : (
                         <span className="text-gray-400">No tenant</span>

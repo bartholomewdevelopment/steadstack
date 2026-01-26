@@ -107,7 +107,11 @@ router.post(
         });
       }
 
-      const { name, code, description, address, coordinates, acreage, type, primaryContact } = req.body;
+      const {
+        name, code, description, address, coordinates, acreage, type, primaryContact,
+        boundaryGeometry, boundaryAreaSqMeters, boundaryAreaAcres, boundaryCentroid,
+        connectedLandRuleAccepted
+      } = req.body;
 
       // Check site limit based on tenant plan
       const siteCount = await Site.countDocuments({
@@ -116,7 +120,7 @@ router.post(
       });
 
       const tenant = req.user.tenantId;
-      const planLimits = { starter: 1, professional: 5, enterprise: -1 };
+      const planLimits = { starter: 1, professional: -1 };
       const limit = planLimits[tenant.plan] || 1;
 
       if (limit !== -1 && siteCount >= limit) {
@@ -125,6 +129,9 @@ router.post(
           message: `Your ${tenant.plan} plan allows up to ${limit} site(s). Please upgrade to add more.`,
         });
       }
+
+      // Determine status: active if boundary is set, draft otherwise
+      const status = boundaryGeometry ? 'active' : 'draft';
 
       const site = await Site.create({
         tenantId: req.user.tenantId,
@@ -136,6 +143,12 @@ router.post(
         acreage,
         type,
         primaryContact,
+        boundaryGeometry,
+        boundaryAreaSqMeters,
+        boundaryAreaAcres,
+        boundaryCentroid,
+        connectedLandRuleAccepted,
+        status,
       });
 
       res.status(201).json({
@@ -195,13 +208,23 @@ router.patch(
         });
       }
 
-      const allowedUpdates = ['name', 'code', 'description', 'address', 'coordinates', 'acreage', 'type', 'status', 'primaryContact', 'settings'];
+      const allowedUpdates = [
+        'name', 'code', 'description', 'address', 'coordinates',
+        'acreage', 'type', 'status', 'primaryContact', 'settings',
+        'boundaryGeometry', 'boundaryAreaSqMeters', 'boundaryAreaAcres',
+        'boundaryCentroid', 'connectedLandRuleAccepted'
+      ];
 
       allowedUpdates.forEach((field) => {
         if (req.body[field] !== undefined) {
           site[field] = req.body[field];
         }
       });
+
+      // Auto-activate site when boundary is set
+      if (req.body.boundaryGeometry && site.status === 'draft') {
+        site.status = 'active';
+      }
 
       await site.save();
 

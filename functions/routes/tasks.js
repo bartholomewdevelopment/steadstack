@@ -757,7 +757,7 @@ router.get(
 
 /**
  * POST /api/tasks/occurrences
- * Create an ad-hoc task occurrence
+ * Create an ad-hoc task occurrence (can be a regular task or an "event" - major task)
  */
 router.post(
   '/occurrences',
@@ -766,6 +766,17 @@ router.post(
     body('siteId').optional(),
     body('templateId').optional(),
     body('priority').optional().isIn(Object.values(firestoreService.TaskPriority)),
+    body('name').optional().isString(),
+    body('description').optional().isString(),
+    // Event fields
+    body('isEvent').optional().isBoolean(),
+    body('eventType').optional().isString(),
+    body('totalCost').optional().isNumeric(),
+    body('totalRevenue').optional().isNumeric(),
+    body('inventoryUsed').optional().isArray(),
+    body('inventoryReceived').optional().isArray(),
+    body('labor').optional().isObject(),
+    body('vendor').optional().isObject(),
   ],
   async (req, res) => {
     try {
@@ -848,7 +859,7 @@ router.post(
 
 /**
  * POST /api/tasks/occurrences/:id/complete
- * Complete a task
+ * Complete a task (or event)
  */
 router.post(
   '/occurrences/:id/complete',
@@ -858,6 +869,16 @@ router.post(
     body('actualDurationMinutes').optional().isNumeric(),
     body('inventoryConsumed').optional().isArray(),
     body('createLinkedEvent').optional().isBoolean(),
+    // Event fields (can be added at completion time for ad-hoc events)
+    body('isEvent').optional().isBoolean(),
+    body('eventType').optional().isString(),
+    body('totalCost').optional().isNumeric(),
+    body('totalRevenue').optional().isNumeric(),
+    body('inventoryUsed').optional().isArray(),
+    body('inventoryReceived').optional().isArray(),
+    body('labor').optional().isObject(),
+    body('vendor').optional().isObject(),
+    body('postToLedger').optional().isBoolean(),
   ],
   async (req, res) => {
     try {
@@ -872,7 +893,22 @@ router.post(
       }
 
       const { tenantId } = userData;
-      const { notes, actualDurationMinutes, inventoryConsumed, createLinkedEvent } = req.body;
+      const {
+        notes,
+        actualDurationMinutes,
+        inventoryConsumed,
+        createLinkedEvent,
+        // Event fields
+        isEvent,
+        eventType,
+        totalCost,
+        totalRevenue,
+        inventoryUsed,
+        inventoryReceived,
+        labor,
+        vendor,
+        postToLedger,
+      } = req.body;
 
       // Get the occurrence first
       const currentOccurrence = await firestoreService.getTaskOccurrence(
@@ -884,11 +920,23 @@ router.post(
         return res.status(404).json({ success: false, message: 'Task occurrence not found' });
       }
 
-      // Complete the task
+      // Complete the task with event data if provided
       const occurrence = await firestoreService.completeTaskOccurrence(
         tenantId,
         req.params.id,
-        { notes, actualDurationMinutes, inventoryConsumed },
+        {
+          notes,
+          actualDurationMinutes,
+          inventoryConsumed,
+          isEvent,
+          eventType,
+          totalCost,
+          totalRevenue,
+          inventoryUsed,
+          inventoryReceived,
+          labor,
+          vendor,
+        },
         req.firebaseUser.uid
       );
 
@@ -936,9 +984,97 @@ router.post(
         }
       }
 
+      // Handle posting for event tasks (major tasks with financial tracking)
+      let postingResult = null;
+      const shouldPost = postToLedger && (occurrence.isEvent || isEvent);
+      if (shouldPost) {
+        try {
+          const finalEventType = occurrence.eventType || eventType;
+          const finalTotalCost = occurrence.totalCost || totalCost || 0;
+          const finalTotalRevenue = occurrence.totalRevenue || totalRevenue || 0;
+          const finalInventoryUsed = occurrence.inventoryUsed || inventoryUsed || [];
+          const finalInventoryReceived = occurrence.inventoryReceived || inventoryReceived || [];
+          const finalLabor = occurrence.labor || labor;
+
+          // Create a Firestore event for posting
+          const idempotencyKey = accountingService.generateIdempotencyKey(
+            tenantId,
+            `task-event-${occurrence.id}`,
+            { completedAt: new Date().toISOString(), eventType: finalEventType }
+          );
+
+          // Map eventType to accounting event type
+          let accountingEventType = 'TASK_EVENT';
+          const costPayload = {
+            taskOccurrenceId: occurrence.id,
+            eventType: finalEventType,
+            totalCost: finalTotalCost,
+            totalRevenue: finalTotalRevenue,
+          };
+
+          // Handle inventory used (consumption)
+          if (finalInventoryUsed.length > 0) {
+            accountingEventType = 'FEED_LIVESTOCK'; // Use existing event type for inventory consumption
+            const totalInventoryCost = finalInventoryUsed.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+            costPayload.feedItemId = finalInventoryUsed[0]?.itemId;
+            costPayload.totalCost = totalInventoryCost;
+            costPayload.qty = finalInventoryUsed.reduce((sum, item) => sum + (item.quantity || 0), 0);
+            costPayload.items = finalInventoryUsed;
+          }
+
+          // Handle inventory received (purchases)
+          if (finalInventoryReceived.length > 0) {
+            accountingEventType = 'RECEIVE_PURCHASE_ORDER';
+            costPayload.items = finalInventoryReceived;
+            costPayload.totalCost = finalInventoryReceived.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+          }
+
+          // Handle labor costs
+          if (finalLabor && finalLabor.hours && finalLabor.rate) {
+            const laborCost = finalLabor.hours * finalLabor.rate;
+            costPayload.laborCost = laborCost;
+            costPayload.labor = finalLabor;
+          }
+
+          // Create and process the event
+          const postingEvent = await firestoreService.createEvent(
+            tenantId,
+            {
+              siteId: occurrence.siteId,
+              type: accountingEventType,
+              occurredAt: new Date(),
+              sourceType: 'TASK_EVENT',
+              sourceId: occurrence.id,
+              payload: costPayload,
+              idempotencyKey,
+            },
+            req.firebaseUser.uid
+          );
+
+          const lockerId = `task-event-${uuidv4()}`;
+          postingResult = await accountingService.processEvent(tenantId, postingEvent.id, lockerId);
+
+          // Mark the task occurrence as posted
+          await firestoreService.updateTaskOccurrence(tenantId, req.params.id, {
+            posted: true,
+            postedAt: new Date(),
+            ledgerTransactionId: postingResult.transactionId?.toString() || null,
+          });
+
+          // Update occurrence object to include posting status
+          occurrence.posted = true;
+          occurrence.postedAt = new Date();
+          occurrence.ledgerTransactionId = postingResult.transactionId?.toString() || null;
+        } catch (postingError) {
+          console.error('Error posting event task to ledger:', postingError);
+          // Don't fail the completion, but include error in response
+          postingResult = { error: postingError.message };
+        }
+      }
+
       res.json({
         success: true,
-        data: { occurrence, linkedEvent },
+        data: { occurrence, linkedEvent, postingResult },
       });
     } catch (error) {
       console.error('Error completing task:', error);

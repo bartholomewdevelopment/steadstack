@@ -211,7 +211,7 @@ export default function Features() {
               Integrations
             </h2>
             <p className="mt-4 text-primary-100">
-              Connect SteadStack with your existing tools (Enterprise plan)
+              Connect SteadStack with your existing tools (Full Access plan)
             </p>
           </div>
 
@@ -272,7 +272,7 @@ export default function Features() {
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link to="/signup" className="btn-primary btn-lg">
-              Start Free Trial
+              Start Free
             </Link>
             <Link to="/contact" className="btn-secondary btn-lg">
               Request Demo

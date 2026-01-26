@@ -81,7 +81,7 @@ export default function Dashboard() {
         {/* Placeholder Cards */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           {[
-            { label: 'Animals', value: '—', icon: '🐄' },
+            { label: 'Livestock', value: '—', icon: '🐄' },
             { label: 'Open Tasks', value: '—', icon: '📋' },
             { label: 'Inventory Alerts', value: '—', icon: '📦' },
           ].map((stat, index) => (

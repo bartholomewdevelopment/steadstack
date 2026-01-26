@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import MarketingLayout from './layouts/MarketingLayout';
 import DashboardLayout from './layouts/DashboardLayout';
 import AdminLayout from './layouts/AdminLayout';
+import AssetsLayout from './layouts/AssetsLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
 import Home from './pages/Home';
@@ -10,8 +11,8 @@ import Features from './pages/Features';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import { Login, Signup, ForgotPassword } from './pages/auth';
-import { DashboardHome, Settings, ComingSoon } from './pages/app';
-import { EventsList, EventForm, EventDetail } from './pages/app/events';
+import { DashboardHome, Settings } from './pages/app';
+// Events removed - now part of Tasks
 import { AnimalsList, AnimalForm, AnimalDetail } from './pages/app/animals';
 import { InventoryList, InventoryForm, InventoryDetail } from './pages/app/inventory';
 import {
@@ -56,6 +57,27 @@ import {
   UsersList,
   InquiriesList,
 } from './pages/admin';
+import { Reports } from './pages/app/reports';
+import {
+  AssetsOverview,
+  VehiclesList,
+  VehicleForm,
+  VehicleDetail,
+  BuildingsPlaceholder,
+  EquipmentPlaceholder,
+  InfrastructurePlaceholder,
+  ToolsPlaceholder,
+  OtherAssetsPlaceholder,
+} from './pages/app/assets';
+import {
+  LandOverview,
+  SitesList,
+  SiteWizard,
+  SiteDetail,
+  LandTractsList,
+  LandTractForm,
+  LandTractDetail,
+} from './pages/app/assets/land';
 
 function App() {
   return (
@@ -87,15 +109,39 @@ function App() {
         }
       >
         <Route index element={<DashboardHome />} />
-        {/* Events Module */}
-        <Route path="events" element={<EventsList />} />
-        <Route path="events/new" element={<EventForm />} />
-        <Route path="events/:id" element={<EventDetail />} />
-        {/* Animals Module */}
-        <Route path="animals" element={<AnimalsList />} />
-        <Route path="animals/new" element={<AnimalForm />} />
-        <Route path="animals/:id" element={<AnimalDetail />} />
-        <Route path="animals/:id/edit" element={<AnimalForm />} />
+        {/* Events removed - redirects to Tasks (events are now part of tasks) */}
+        <Route path="events/*" element={<Navigate to="/app/tasks" replace />} />
+        {/* Assets Module - All wrapped with AssetsLayout for shared nav */}
+        <Route path="assets" element={<AssetsLayout />}>
+          <Route index element={<AssetsOverview />} />
+          <Route path="animals" element={<AnimalsList />} />
+          <Route path="animals/new" element={<AnimalForm />} />
+          <Route path="animals/:id" element={<AnimalDetail />} />
+          <Route path="animals/:id/edit" element={<AnimalForm />} />
+          <Route path="vehicles" element={<VehiclesList />} />
+          <Route path="vehicles/new" element={<VehicleForm />} />
+          <Route path="vehicles/:id" element={<VehicleDetail />} />
+          <Route path="vehicles/:id/edit" element={<VehicleForm />} />
+          {/* Land Module */}
+          <Route path="land" element={<LandOverview />} />
+          <Route path="land/sites" element={<SitesList />} />
+          <Route path="land/sites/new" element={<SiteWizard />} />
+          <Route path="land/sites/:siteId" element={<SiteDetail />} />
+          <Route path="land/tracts" element={<LandTractsList />} />
+          <Route path="land/tracts/new" element={<LandTractForm />} />
+          <Route path="land/tracts/:tractId" element={<LandTractDetail />} />
+          <Route path="land/tracts/:tractId/edit" element={<LandTractForm />} />
+          <Route path="buildings" element={<BuildingsPlaceholder />} />
+          <Route path="equipment" element={<EquipmentPlaceholder />} />
+          <Route path="infrastructure" element={<InfrastructurePlaceholder />} />
+          <Route path="tools" element={<ToolsPlaceholder />} />
+          <Route path="other" element={<OtherAssetsPlaceholder />} />
+        </Route>
+        {/* Legacy Animals Routes - Redirect to Assets */}
+        <Route path="animals" element={<Navigate to="/app/assets/animals" replace />} />
+        <Route path="animals/new" element={<Navigate to="/app/assets/animals/new" replace />} />
+        <Route path="animals/:id" element={<Navigate to="/app/assets/animals/:id" replace />} />
+        <Route path="animals/:id/edit" element={<Navigate to="/app/assets/animals/:id/edit" replace />} />
         {/* Inventory Module */}
         <Route path="inventory" element={<InventoryList />} />
         <Route path="inventory/new" element={<InventoryForm />} />
@@ -137,8 +183,8 @@ function App() {
         <Route path="purchasing/payments/new" element={<PaymentForm />} />
         <Route path="purchasing/ap-aging" element={<APAging />} />
         <Route path="purchasing/vendors" element={<VendorsList />} />
-        {/* Reports (Coming Soon) */}
-        <Route path="reports" element={<ComingSoon module="reports" />} />
+        {/* Reports Module */}
+        <Route path="reports" element={<Reports />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 

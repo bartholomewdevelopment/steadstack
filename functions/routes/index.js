@@ -12,6 +12,11 @@ const adminRoutes = require('./admin');
 const postingRoutes = require('./posting');
 const accountingRoutes = require('./accounting');
 const purchasingRoutes = require('./purchasing');
+const assetsRoutes = require('./assets');
+const vehiclesRoutes = require('./vehicles');
+const landTractsRoutes = require('./landTracts');
+const webhooksRoutes = require('./webhooks');
+const billingRoutes = require('./billing');
 
 const router = express.Router();
 
@@ -28,5 +33,10 @@ router.use('/admin', adminRoutes);
 router.use('/posting', postingRoutes);
 router.use('/accounting', accountingRoutes);
 router.use('/purchasing', purchasingRoutes);
+router.use('/assets', assetsRoutes);
+router.use('/vehicles', vehiclesRoutes);
+router.use('/land-tracts', landTractsRoutes);
+router.use('/webhooks', webhooksRoutes);
+router.use('/billing', billingRoutes);
 
 module.exports = router;

@@ -29,6 +29,27 @@ const tenantSchema = new mongoose.Schema(
     trialEndsAt: {
       type: Date,
     },
+    // Stripe subscription fields
+    stripeCustomerId: {
+      type: String,
+      sparse: true,
+    },
+    stripeSubscriptionId: {
+      type: String,
+      sparse: true,
+    },
+    subscriptionStatus: {
+      type: String,
+      enum: ['active', 'canceled', 'past_due', 'trialing', 'incomplete', null],
+      default: null,
+    },
+    currentPeriodEnd: {
+      type: Date,
+    },
+    cancelAtPeriodEnd: {
+      type: Boolean,
+      default: false,
+    },
     settings: {
       timezone: { type: String, default: 'America/Chicago' },
       currency: { type: String, default: 'USD' },

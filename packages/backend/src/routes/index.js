@@ -11,6 +11,10 @@ const tasksRoutes = require('./tasks');
 const adminRoutes = require('./admin');
 const postingRoutes = require('./posting');
 const accountingRoutes = require('./accounting');
+const assetsRoutes = require('./assets');
+const vehiclesRoutes = require('./vehicles');
+const landTractsRoutes = require('./landTracts');
+const purchasingRoutes = require('./purchasing');
 
 const router = express.Router();
 
@@ -26,5 +30,9 @@ router.use('/tasks', tasksRoutes);
 router.use('/admin', adminRoutes);
 router.use('/posting', postingRoutes);
 router.use('/accounting', accountingRoutes);
+router.use('/assets', assetsRoutes);
+router.use('/vehicles', vehiclesRoutes);
+router.use('/land-tracts', landTractsRoutes);
+router.use('/purchasing', purchasingRoutes);
 
 module.exports = router;

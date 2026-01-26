@@ -27,6 +27,23 @@ const priorityColors = {
   LOW: 'bg-gray-100 text-gray-800 border-gray-300',
 };
 
+const eventTypeOptions = [
+  { value: 'feeding', label: 'Feeding', icon: '🍽️' },
+  { value: 'treatment', label: 'Treatment/Medical', icon: '💊' },
+  { value: 'purchase', label: 'Purchase', icon: '🛒' },
+  { value: 'sale', label: 'Sale', icon: '💰' },
+  { value: 'maintenance', label: 'Maintenance', icon: '🔧' },
+  { value: 'labor', label: 'Labor', icon: '👷' },
+  { value: 'breeding', label: 'Breeding', icon: '🐄' },
+  { value: 'birth', label: 'Birth', icon: '🐣' },
+  { value: 'death', label: 'Death/Loss', icon: '💀' },
+  { value: 'harvest', label: 'Harvest', icon: '🌾' },
+  { value: 'cleaning', label: 'Deep Cleaning', icon: '🧹' },
+  { value: 'showing', label: 'Show/Competition', icon: '🏆' },
+  { value: 'butchering', label: 'Butchering', icon: '🔪' },
+  { value: 'custom', label: 'Other', icon: '📝' },
+];
+
 const statusColors = {
   SCHEDULED: 'bg-gray-100 text-gray-600',
   IN_PROGRESS: 'bg-blue-100 text-blue-700',
@@ -46,6 +63,7 @@ export default function TodaysTasks() {
   const [actionLoading, setActionLoading] = useState(null);
   const [showCompleteModal, setShowCompleteModal] = useState(null);
   const [showSkipModal, setShowSkipModal] = useState(null);
+  const [showAddEventModal, setShowAddEventModal] = useState(false);
 
   useEffect(() => {
     if (currentSite?.id) {
@@ -113,6 +131,21 @@ export default function TodaysTasks() {
     }
   };
 
+  const handleAddEvent = async (eventData) => {
+    try {
+      await tasksApi.createOccurrence({
+        ...eventData,
+        siteId: currentSite.id,
+        scheduledDate: selectedDate,
+        isEvent: true,
+      });
+      setShowAddEventModal(false);
+      await fetchTasks();
+    } catch (err) {
+      alert('Failed to create event: ' + err.message);
+    }
+  };
+
   const filteredTasks = tasks.filter((task) => {
     if (filter === 'all') return true;
     if (filter === 'pending') return ['SCHEDULED', 'IN_PROGRESS', 'OVERDUE'].includes(task.status);
@@ -157,6 +190,15 @@ export default function TodaysTasks() {
             onChange={(e) => setSelectedDate(e.target.value)}
             className="input py-2"
           />
+          <button
+            onClick={() => setShowAddEventModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add Event
+          </button>
           <Link to="/app/tasks/lists" className="btn-secondary">
             Manage Lists
           </Link>
@@ -331,7 +373,11 @@ export default function TodaysTasks() {
                     {/* Task Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-lg">{categoryIcons[task.category] || '📝'}</span>
+                        {task.isEvent ? (
+                          <span className="text-lg">⭐</span>
+                        ) : (
+                          <span className="text-lg">{categoryIcons[task.category] || '📝'}</span>
+                        )}
                         <span
                           className={`font-medium ${
                             task.status === 'COMPLETED' ? 'text-gray-500 line-through' : 'text-gray-900'
@@ -339,9 +385,22 @@ export default function TodaysTasks() {
                         >
                           {task.name}
                         </span>
+                        {task.isEvent && (
+                          <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
+                            {eventTypeOptions.find(e => e.value === task.eventType)?.label || 'Event'}
+                          </span>
+                        )}
                         {task.status === 'OVERDUE' && (
                           <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded">
                             Overdue
+                          </span>
+                        )}
+                        {task.posted && (
+                          <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            Posted
                           </span>
                         )}
                       </div>
@@ -353,6 +412,16 @@ export default function TodaysTasks() {
                           <span>{task.estimatedDurationMinutes} min</span>
                         )}
                         {task.scheduledTime && <span>{task.scheduledTime}</span>}
+                        {task.isEvent && task.totalCost > 0 && (
+                          <span className="text-amber-600 font-medium">
+                            ${task.totalCost.toFixed(2)}
+                          </span>
+                        )}
+                        {task.isEvent && task.totalRevenue > 0 && (
+                          <span className="text-green-600 font-medium">
+                            +${task.totalRevenue.toFixed(2)}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -402,6 +471,14 @@ export default function TodaysTasks() {
           loading={actionLoading === showSkipModal.id}
         />
       )}
+
+      {/* Add Event Modal */}
+      {showAddEventModal && (
+        <AddEventModal
+          onAdd={handleAddEvent}
+          onClose={() => setShowAddEventModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -409,19 +486,35 @@ export default function TodaysTasks() {
 function CompleteTaskModal({ task, onComplete, onClose, loading }) {
   const [notes, setNotes] = useState('');
   const [actualDuration, setActualDuration] = useState(task.estimatedDurationMinutes || '');
+  const [isEvent, setIsEvent] = useState(task.isEvent || false);
+  const [eventType, setEventType] = useState(task.eventType || '');
+  const [totalCost, setTotalCost] = useState(task.totalCost || '');
+  const [totalRevenue, setTotalRevenue] = useState(task.totalRevenue || '');
+  const [postToLedger, setPostToLedger] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onComplete({
+    const data = {
       notes,
       actualDurationMinutes: actualDuration ? parseInt(actualDuration) : undefined,
-    });
+    };
+
+    // Add event data if this is an event
+    if (isEvent) {
+      data.isEvent = true;
+      data.eventType = eventType;
+      data.totalCost = totalCost ? parseFloat(totalCost) : 0;
+      data.totalRevenue = totalRevenue ? parseFloat(totalRevenue) : 0;
+      data.postToLedger = postToLedger;
+    }
+
+    onComplete(data);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-gray-900/50" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+      <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Complete Task</h3>
         <p className="text-gray-600 mb-4">{task.name}</p>
 
@@ -444,9 +537,89 @@ function CompleteTaskModal({ task, onComplete, onClose, loading }) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="input"
-              rows={3}
+              rows={2}
               placeholder="Any notes about this task..."
             />
+          </div>
+
+          {/* Event Section */}
+          <div className="border-t border-gray-200 pt-4 mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h4 className="font-medium text-gray-900">Mark as Event</h4>
+                <p className="text-sm text-gray-500">Track financial impact</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isEvent}
+                  onChange={(e) => setIsEvent(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+              </label>
+            </div>
+
+            {isEvent && (
+              <div className="space-y-4 bg-purple-50 rounded-lg p-4">
+                <div>
+                  <label className="label">Event Type</label>
+                  <select
+                    value={eventType}
+                    onChange={(e) => setEventType(e.target.value)}
+                    className="input"
+                    required={isEvent}
+                  >
+                    <option value="">Select type...</option>
+                    {eventTypeOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.icon} {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Total Cost ($)</label>
+                    <input
+                      type="number"
+                      value={totalCost}
+                      onChange={(e) => setTotalCost(e.target.value)}
+                      className="input"
+                      placeholder="0.00"
+                      step="0.01"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Total Revenue ($)</label>
+                    <input
+                      type="number"
+                      value={totalRevenue}
+                      onChange={(e) => setTotalRevenue(e.target.value)}
+                      className="input"
+                      placeholder="0.00"
+                      step="0.01"
+                      min="0"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="postToLedger"
+                    checked={postToLedger}
+                    onChange={(e) => setPostToLedger(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <label htmlFor="postToLedger" className="text-sm text-gray-700">
+                    Post to accounting ledger
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-4">
@@ -501,6 +674,182 @@ function SkipTaskModal({ task, onSkip, onClose, loading }) {
             </button>
             <button type="submit" disabled={loading} className="btn-primary flex-1">
               {loading ? 'Skipping...' : 'Skip Task'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AddEventModal({ onAdd, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    eventType: '',
+    priority: 'MEDIUM',
+    totalCost: '',
+    totalRevenue: '',
+    scheduledTime: '',
+  });
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      alert('Event name is required');
+      return;
+    }
+    if (!form.eventType) {
+      alert('Event type is required');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onAdd({
+        name: form.name,
+        description: form.description,
+        eventType: form.eventType,
+        priority: form.priority,
+        totalCost: form.totalCost ? parseFloat(form.totalCost) : 0,
+        totalRevenue: form.totalRevenue ? parseFloat(form.totalRevenue) : 0,
+        scheduledTime: form.scheduledTime || undefined,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-gray-900/50" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-2xl">⭐</span>
+          <h3 className="text-lg font-semibold text-gray-900">Add Event</h3>
+        </div>
+        <p className="text-gray-600 mb-4">
+          Create a major task/event with financial tracking.
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="label">Event Name *</label>
+            <input
+              type="text"
+              name="name"
+              value={form.name}
+              onChange={handleChange}
+              className="input"
+              placeholder="e.g., Butchering Day, Deep Cleaning, Show Pigs"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="label">Event Type *</label>
+            <select
+              name="eventType"
+              value={form.eventType}
+              onChange={handleChange}
+              className="input"
+              required
+            >
+              <option value="">Select type...</option>
+              {eventTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.icon} {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">Description</label>
+            <textarea
+              name="description"
+              value={form.description}
+              onChange={handleChange}
+              className="input"
+              rows={2}
+              placeholder="Details about this event..."
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Priority</label>
+              <select
+                name="priority"
+                value={form.priority}
+                onChange={handleChange}
+                className="input"
+              >
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="URGENT">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Time (optional)</label>
+              <input
+                type="time"
+                name="scheduledTime"
+                value={form.scheduledTime}
+                onChange={handleChange}
+                className="input"
+              />
+            </div>
+          </div>
+
+          <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+            <h4 className="font-medium text-amber-800 mb-3">Financial Tracking</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label text-amber-700">Expected Cost ($)</label>
+                <input
+                  type="number"
+                  name="totalCost"
+                  value={form.totalCost}
+                  onChange={handleChange}
+                  className="input"
+                  placeholder="0.00"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              <div>
+                <label className="label text-amber-700">Expected Revenue ($)</label>
+                <input
+                  type="number"
+                  name="totalRevenue"
+                  value={form.totalRevenue}
+                  onChange={handleChange}
+                  className="input"
+                  placeholder="0.00"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-amber-600 mt-2">
+              You can update these amounts when completing the event.
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading} className="btn-primary flex-1">
+              {loading ? 'Creating...' : 'Create Event'}
             </button>
           </div>
         </form>

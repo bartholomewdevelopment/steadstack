@@ -116,7 +116,7 @@ router.post(
       });
 
       const tenant = req.user.tenantId;
-      const planLimits = { starter: 1, professional: 5, enterprise: -1 };
+      const planLimits = { starter: 1, professional: -1 };
       const limit = planLimits[tenant.plan] || 1;
 
       if (limit !== -1 && siteCount >= limit) {

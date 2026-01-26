@@ -52,8 +52,16 @@ app.use(cors({
   credentials: true,
 }));
 
-// Body parsing
-app.use(express.json({ limit: '10kb' }));
+// Body parsing - preserve raw body for Stripe webhooks
+app.use(express.json({
+  limit: '10kb',
+  verify: (req, res, buf) => {
+    // Store raw body for Stripe webhook signature verification
+    if (req.originalUrl.includes('/webhooks/stripe')) {
+      req.rawBody = buf;
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // Connect to DB before handling requests

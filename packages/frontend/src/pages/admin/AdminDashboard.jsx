@@ -113,7 +113,7 @@ export default function AdminDashboard() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Tenants by Plan</h2>
           <div className="space-y-3">
-            {['starter', 'professional', 'enterprise'].map((plan) => {
+            {['starter', 'professional'].map((plan) => {
               const count = stats?.tenants?.byPlan?.[plan] || 0;
               const percentage = stats?.tenants?.total
                 ? Math.round((count / stats.tenants.total) * 100)
@@ -122,16 +122,14 @@ export default function AdminDashboard() {
               return (
                 <div key={plan} className="flex items-center gap-4">
                   <div className="w-24 text-sm font-medium text-gray-700 capitalize">
-                    {plan}
+                    {plan === 'starter' ? 'Free' : 'Full Access'}
                   </div>
                   <div className="flex-1 bg-gray-100 rounded-full h-3">
                     <div
                       className={`h-3 rounded-full ${
                         plan === 'starter'
                           ? 'bg-gray-400'
-                          : plan === 'professional'
-                          ? 'bg-blue-500'
-                          : 'bg-purple-500'
+                          : 'bg-blue-500'
                       }`}
                       style={{ width: `${percentage}%` }}
                     />

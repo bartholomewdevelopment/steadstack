@@ -18,14 +18,16 @@ app.use(
   })
 );
 
-// Rate limiting
+// Rate limiting - more permissive in development
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: config.nodeEnv === 'development' ? 1000 : 100, // higher limit for dev
   message: {
     success: false,
     message: 'Too many requests, please try again later.',
   },
+  // Skip rate limiting for auth endpoints in development (React Strict Mode causes double mounts)
+  skip: (req) => config.nodeEnv === 'development' && req.path.startsWith('/api/auth'),
 });
 app.use('/api/', limiter);
 

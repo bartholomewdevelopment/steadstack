@@ -114,7 +114,7 @@ export default function Signup() {
             Start your free trial
           </h2>
           <p className="mt-2 text-gray-600">
-            14 days free. No credit card required.
+            Start free. No credit card required.
           </p>
         </div>
 
