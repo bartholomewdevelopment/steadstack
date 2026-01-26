@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { accountingApi } from '../../../services/api';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const agingBuckets = [
   { key: 'current', label: 'Current', color: 'bg-green-100 text-green-700' },
@@ -64,7 +65,10 @@ export default function AccountsPayable() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Accounts Payable</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Accounts Payable</h1>
+            <HelpTooltip content="A/P tracks money you owe vendors. Enter bills, schedule payments, and avoid late fees by monitoring due dates." position="right" />
+          </div>
           <p className="text-gray-600">Track vendor bills and payments</p>
         </div>
         <div className="flex gap-3">
@@ -80,7 +84,10 @@ export default function AccountsPayable() {
       {/* Aging Summary */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-900">Aging Summary</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">Aging Summary</h2>
+            <HelpTooltip content="Aging shows how long bills have been outstanding. Pay attention to bills approaching due dates to avoid late fees." position="right" />
+          </div>
           <span className="text-2xl font-bold text-red-600">{formatCurrency(totalAP)}</span>
         </div>
         <div className="grid grid-cols-5 gap-4">

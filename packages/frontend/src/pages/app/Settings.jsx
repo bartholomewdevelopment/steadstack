@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSite } from '../../contexts/SiteContext';
+import { billingApi } from '../../services/api';
+import { HelpTooltip } from '../../components/ui/Tooltip';
 
 export default function Settings() {
   const { user, userProfile, updateUserProfile } = useAuth();
@@ -17,7 +19,10 @@ export default function Settings() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-2xl font-display font-bold text-gray-900 mb-6">Settings</h1>
+      <div className="flex items-center gap-2 mb-6">
+        <h1 className="text-2xl font-display font-bold text-gray-900">Settings</h1>
+        <HelpTooltip content="Configure your profile, farm settings, team members, and billing. Changes here affect your entire organization." position="right" />
+      </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
@@ -240,7 +245,7 @@ function TeamSettings({ userProfile }) {
         </div>
 
         <p className="text-sm text-gray-500 mt-4">
-          Invite team members to help manage your farm. Available on Professional and Enterprise plans.
+          Invite team members to help manage your farm. Available on Full Access plans.
         </p>
       </div>
     </div>
@@ -248,44 +253,177 @@ function TeamSettings({ userProfile }) {
 }
 
 function BillingSettings({ userProfile }) {
+  const { user } = useAuth();
   const tenant = userProfile?.tenant;
+  const [loading, setLoading] = useState(false);
+  const [subscription, setSubscription] = useState(null);
+  const [error, setError] = useState('');
+
+  // Check URL params for success/cancel
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('success') === 'true') {
+      // Subscription was successful - refresh subscription status
+      fetchSubscription();
+    }
+  }, []);
+
+  const fetchSubscription = async () => {
+    if (!tenant?._id && !tenant?.id) return;
+    try {
+      const result = await billingApi.getSubscription(tenant._id || tenant.id);
+      if (result.success) {
+        setSubscription(result.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch subscription:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchSubscription();
+  }, [tenant]);
+
+  const handleUpgrade = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await billingApi.createCheckoutSession({
+        tenantId: tenant._id || tenant.id,
+        userId: user.uid,
+        userEmail: user.email,
+      });
+
+      if (result.success && result.url) {
+        // Redirect to Stripe Checkout
+        window.location.href = result.url;
+      } else {
+        setError('Failed to start checkout. Please try again.');
+      }
+    } catch (err) {
+      console.error('Checkout error:', err);
+      setError(err.message || 'Failed to start checkout. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await billingApi.createPortalSession({
+        tenantId: tenant._id || tenant.id,
+      });
+
+      if (result.success && result.url) {
+        window.location.href = result.url;
+      } else {
+        setError('Failed to open billing portal. Please try again.');
+      }
+    } catch (err) {
+      console.error('Portal error:', err);
+      setError(err.message || 'Failed to open billing portal. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isSubscribed = subscription?.hasActiveSubscription || tenant?.plan === 'professional';
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          {error}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Current Plan</h2>
 
-        <div className="flex items-center justify-between p-4 bg-primary-50 rounded-lg border border-primary-200">
+        <div className={`flex items-center justify-between p-4 rounded-lg border ${
+          isSubscribed
+            ? 'bg-green-50 border-green-200'
+            : 'bg-primary-50 border-primary-200'
+        }`}>
           <div>
-            <p className="font-semibold text-gray-900 capitalize">{tenant?.plan || 'Starter'} Plan</p>
+            <p className="font-semibold text-gray-900">
+              {isSubscribed ? 'Full Access' : 'Free'} Plan
+            </p>
             <p className="text-sm text-gray-600">
-              {tenant?.status === 'trial' ? 'Trial period active' : 'Active subscription'}
+              {isSubscribed
+                ? (subscription?.cancelAtPeriodEnd
+                    ? `Cancels on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
+                    : 'Active subscription - $34.99/month')
+                : (tenant?.status === 'trial' ? 'Trial period active' : 'Free tier')}
             </p>
           </div>
-          <button className="btn-primary text-sm">Upgrade</button>
+          {isSubscribed ? (
+            <button
+              onClick={handleManageSubscription}
+              disabled={loading}
+              className="btn-secondary text-sm"
+            >
+              {loading ? 'Loading...' : 'Manage Subscription'}
+            </button>
+          ) : (
+            <button
+              onClick={handleUpgrade}
+              disabled={loading}
+              className="btn-primary text-sm"
+            >
+              {loading ? 'Loading...' : 'Upgrade to Full Access'}
+            </button>
+          )}
         </div>
 
         <div className="mt-6 grid md:grid-cols-3 gap-4">
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-500">Sites</p>
-            <p className="text-2xl font-bold text-gray-900">1 / 1</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {isSubscribed ? 'Unlimited' : '1 / 1'}
+            </p>
           </div>
           <div className="p-4 bg-gray-50 rounded-lg">
             <p className="text-sm text-gray-500">Team Members</p>
-            <p className="text-2xl font-bold text-gray-900">1 / 2</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {isSubscribed ? '10' : '1 / 2'}
+            </p>
           </div>
           <div className="p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-500">Animals</p>
-            <p className="text-2xl font-bold text-gray-900">0 / 50</p>
+            <p className="text-sm text-gray-500">Livestock</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {isSubscribed ? 'Unlimited' : '0 / 5'}
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Payment Method</h2>
-        <p className="text-gray-500">No payment method on file.</p>
-        <button className="btn-secondary mt-4">Add Payment Method</button>
-      </div>
+      {!isSubscribed && (
+        <div className="bg-gradient-to-r from-primary-500 to-primary-600 rounded-xl p-6 text-white">
+          <h3 className="text-lg font-semibold mb-2">Upgrade to Full Access</h3>
+          <p className="text-primary-100 mb-4">
+            Unlock unlimited sites, livestock tracking, full inventory management,
+            double-entry accounting, and priority support.
+          </p>
+          <ul className="text-sm text-primary-100 space-y-1 mb-4">
+            <li>✓ Unlimited sites and animals</li>
+            <li>✓ Full inventory & purchasing</li>
+            <li>✓ Complete accounting system</li>
+            <li>✓ Reports and analytics</li>
+          </ul>
+          <button
+            onClick={handleUpgrade}
+            disabled={loading}
+            className="bg-white text-primary-600 px-4 py-2 rounded-lg font-medium hover:bg-primary-50 transition-colors"
+          >
+            {loading ? 'Loading...' : 'Upgrade Now - $34.99/month'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

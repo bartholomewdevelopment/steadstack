@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { inventoryApi } from '../../../services/api';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const categoryIcons = {
   FEED: '🌾',
@@ -86,7 +87,10 @@ export default function InventoryList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
+            <HelpTooltip content="Track supplies across all sites. Set reorder points to get alerts when stock runs low." position="right" />
+          </div>
           <p className="text-gray-600">Manage supplies, feed, and equipment</p>
         </div>
         <Link to="/app/inventory/new" className="btn-primary">

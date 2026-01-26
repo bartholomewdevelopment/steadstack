@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
 import { purchasingApi } from '../../../services/api';
 import PurchasingNav from '../../../components/purchasing/PurchasingNav';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const statusColors = {
   DRAFT: 'bg-gray-100 text-gray-700',
@@ -94,7 +95,10 @@ export default function RequisitionsList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Purchase Requisitions</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Purchase Requisitions</h1>
+            <HelpTooltip content="Requisitions are internal requests for items. Once approved, they can be converted to purchase orders sent to vendors." position="right" />
+          </div>
           <p className="text-gray-600">Request items for purchase</p>
         </div>
         <Link to="/app/purchasing/requisitions/new" className="btn-primary">

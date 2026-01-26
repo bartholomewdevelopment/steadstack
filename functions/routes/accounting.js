@@ -134,6 +134,92 @@ router.delete('/accounts/:id', async (req, res, next) => {
   }
 });
 
+// Bulk import accounts from CSV
+router.post('/accounts/import', [
+  body('accounts').isArray({ min: 1 }).withMessage('At least one account is required'),
+  body('accounts.*.code').notEmpty().trim().withMessage('Account code is required'),
+  body('accounts.*.name').notEmpty().trim().withMessage('Account name is required'),
+  body('accounts.*.type').isIn(['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE', 'COGS']).withMessage('Invalid account type'),
+], validate, async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { accounts, skipDuplicates = true } = req.body;
+
+    const results = {
+      success: [],
+      errors: [],
+      skipped: [],
+    };
+
+    const debitTypes = ['ASSET', 'EXPENSE', 'COGS'];
+    const validSubtypes = [
+      'CASH', 'BANK', 'AR', 'INVENTORY', 'PREPAID', 'FIXED_ASSET', 'LIVESTOCK', 'EQUIPMENT', 'LAND',
+      'AP', 'CREDIT_CARD', 'LOAN',
+      'OWNER_EQUITY', 'RETAINED_EARNINGS',
+      'SALES', 'SERVICE_INCOME', 'OTHER_INCOME',
+      'FEED', 'MEDICAL', 'LABOR', 'FUEL', 'REPAIRS', 'UTILITIES', 'INSURANCE', 'DEPRECIATION', 'INTEREST', 'OTHER',
+    ];
+
+    for (let i = 0; i < accounts.length; i++) {
+      const row = accounts[i];
+      const rowNum = i + 1;
+
+      try {
+        // Validate subtype if provided
+        if (row.subtype && !validSubtypes.includes(row.subtype.toUpperCase())) {
+          results.errors.push({ row: rowNum, code: row.code, error: `Invalid subtype: ${row.subtype}` });
+          continue;
+        }
+
+        // Check if account code already exists
+        const existing = await Account.findOne({ tenantId, code: row.code.trim() });
+        if (existing) {
+          if (skipDuplicates) {
+            results.skipped.push({ row: rowNum, code: row.code, reason: 'Account code already exists' });
+            continue;
+          } else {
+            results.errors.push({ row: rowNum, code: row.code, error: 'Account code already exists' });
+            continue;
+          }
+        }
+
+        // Auto-calculate normalBalance based on account type
+        const normalBalance = debitTypes.includes(row.type.toUpperCase()) ? 'DEBIT' : 'CREDIT';
+
+        const account = new Account({
+          tenantId,
+          code: row.code.trim(),
+          name: row.name.trim(),
+          type: row.type.toUpperCase(),
+          subtype: row.subtype ? row.subtype.toUpperCase() : undefined,
+          description: row.description?.trim() || '',
+          normalBalance,
+          isActive: row.isActive !== false,
+          isSystem: false,
+        });
+
+        await account.save();
+        results.success.push({ row: rowNum, code: row.code, id: account._id.toString() });
+      } catch (err) {
+        results.errors.push({ row: rowNum, code: row.code, error: err.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: results,
+      summary: {
+        total: accounts.length,
+        imported: results.success.length,
+        skipped: results.skipped.length,
+        failed: results.errors.length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get account balance
 router.get('/accounts/:id/balance', async (req, res, next) => {
   try {

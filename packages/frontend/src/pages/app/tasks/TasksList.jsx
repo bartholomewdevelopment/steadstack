@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
 import { tasksApi } from '../../../services/api';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const categoryIcons = {
   FEEDING: '🍽️',
@@ -121,7 +122,10 @@ export default function TasksList() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display font-bold text-gray-900">Task Templates</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-display font-bold text-gray-900">Task Templates</h1>
+            <HelpTooltip content="Templates define recurring tasks. Add them to runlists to schedule them automatically or generate one-time occurrences." position="right" />
+          </div>
           <p className="text-gray-600">Create reusable tasks to add to your chore lists</p>
         </div>
         <Link to="/app/tasks/templates/new" className="btn-primary inline-flex items-center gap-2">

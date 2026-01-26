@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
 import { animalsApi, sitesApi } from '../../../services/api';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const speciesIcons = {
   cattle: '🐄',
@@ -112,11 +113,14 @@ export default function AnimalsList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Animals</h1>
-          <p className="text-gray-600">Manage your livestock and animals</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Livestock</h1>
+            <HelpTooltip content="Track individual animals with tags, health records, and breeding history. Filter by status to see active, sold, or deceased animals." position="right" />
+          </div>
+          <p className="text-gray-600">Manage your livestock</p>
         </div>
         <Link to="/app/animals/new" className="btn-primary">
-          + Add Animal
+          + Add Livestock
         </Link>
       </div>
 
@@ -202,11 +206,11 @@ export default function AnimalsList() {
         </div>
       </div>
 
-      {/* Animals List */}
+      {/* Livestock List */}
       {loading ? (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-red-500 border-t-transparent"></div>
-          <p className="mt-2 text-gray-500">Loading animals...</p>
+          <p className="mt-2 text-gray-500">Loading livestock...</p>
         </div>
       ) : error ? (
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
@@ -220,14 +224,14 @@ export default function AnimalsList() {
           <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
             <span className="text-3xl">🐄</span>
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No animals found</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No livestock found</h3>
           <p className="text-gray-500 mb-4">
             {currentSearch || currentSpecies || currentGroup
               ? 'Try adjusting your filters'
-              : 'Start by adding your first animal'}
+              : 'Start by adding your first livestock'}
           </p>
           <Link to="/app/animals/new" className="btn-primary">
-            + Add Animal
+            + Add Livestock
           </Link>
         </div>
       ) : (

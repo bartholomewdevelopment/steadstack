@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSite } from '../../contexts/SiteContext';
 import { animalsApi, inventoryApi, tasksApi, eventsApi } from '../../services/api';
+import { HelpTooltip } from '../../components/ui/Tooltip';
 
 export default function DashboardHome() {
   const { user } = useAuth();
@@ -110,10 +111,10 @@ export default function DashboardHome() {
   };
 
   const statCards = [
-    { label: 'Animals', value: stats.animals.value, loading: stats.animals.loading, icon: '🐄', href: '/app/animals' },
-    { label: 'Open Tasks', value: stats.tasks.value, loading: stats.tasks.loading, icon: '📋', href: '/app/tasks' },
-    { label: 'Low Stock Items', value: stats.inventory.value, loading: stats.inventory.loading, icon: '📦', href: '/app/inventory' },
-    { label: 'Recent Events', value: stats.events.value, loading: stats.events.loading, icon: '📅', href: '/app/events' },
+    { label: 'Livestock', value: stats.animals.value, loading: stats.animals.loading, icon: '🐄', href: '/app/animals', tooltip: 'Total number of active animals registered across all sites' },
+    { label: 'Open Tasks', value: stats.tasks.value, loading: stats.tasks.loading, icon: '📋', href: '/app/tasks', tooltip: 'Tasks that are pending or in progress at this site' },
+    { label: 'Low Stock Items', value: stats.inventory.value, loading: stats.inventory.loading, icon: '📦', href: '/app/inventory', tooltip: 'Items that have fallen below their reorder point' },
+    { label: 'Recent Events', value: stats.events.value, loading: stats.events.loading, icon: '📅', href: '/app/events', tooltip: 'Farm activities logged in the last few days' },
   ];
 
   const quickActions = [
@@ -172,7 +173,10 @@ export default function DashboardHome() {
             className="bg-white rounded-xl border border-gray-200 p-5 hover:border-primary-300 hover:shadow-md transition-all"
           >
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-500">{stat.label}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-medium text-gray-500">{stat.label}</p>
+                <HelpTooltip content={stat.tooltip} position="top" />
+              </div>
               <span className="text-2xl">{stat.icon}</span>
             </div>
             <p className="text-3xl font-bold text-gray-900 mt-2">
@@ -188,7 +192,10 @@ export default function DashboardHome() {
 
       {/* Quick actions */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
+          <HelpTooltip content="Common tasks you can start right away. Click any action to begin." position="right" />
+        </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {quickActions.map((action, index) => (
             <Link
@@ -208,11 +215,14 @@ export default function DashboardHome() {
         </div>
       </div>
 
-      {/* Recent Animals */}
+      {/* Recent Livestock */}
       {recentAnimals.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Animals</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-gray-900">Recent Livestock</h2>
+              <HelpTooltip content="Your most recently added or updated animals. Click an ID to view full details." position="right" />
+            </div>
             <Link to="/app/animals" className="text-sm text-primary-600 hover:text-primary-700">
               View all →
             </Link>
@@ -258,7 +268,10 @@ export default function DashboardHome() {
       {recentEvents.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
+              <HelpTooltip content="Events track farm activities like feedings, treatments, and movements. They can be posted to the general ledger." position="right" />
+            </div>
             <Link to="/app/events" className="text-sm text-primary-600 hover:text-primary-700">
               View all →
             </Link>

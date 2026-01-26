@@ -128,6 +128,18 @@ export const sitesApi = {
   create: (data) => api.post('/sites', data),
   update: (id, data) => api.patch(`/sites/${id}`, data),
   delete: (id) => api.delete(`/sites/${id}`),
+  // Boundary operations
+  updateBoundary: (id, boundaryData) => api.patch(`/sites/${id}`, boundaryData),
+};
+
+// Land Tracts API
+export const landTractsApi = {
+  list: (params) => api.get('/land-tracts', params),
+  get: (id) => api.get(`/land-tracts/${id}`),
+  create: (data) => api.post('/land-tracts', data),
+  update: (id, data) => api.patch(`/land-tracts/${id}`, data),
+  updateStatus: (id, data) => api.post(`/land-tracts/${id}/status`, data),
+  getStats: (params) => api.get('/land-tracts/stats', params),
 };
 
 // Animals API
@@ -219,6 +231,7 @@ export const accountingApi = {
   updateAccount: (id, data) => api.put(`/accounting/accounts/${id}`, data),
   deleteAccount: (id) => api.delete(`/accounting/accounts/${id}`),
   getAccountBalance: (id, params) => api.get(`/accounting/accounts/${id}/balance`, params),
+  importAccounts: (accounts, skipDuplicates = true) => api.post('/accounting/accounts/import', { accounts, skipDuplicates }),
 
   // Transactions / Inquiry
   getTransactions: (params) => api.get('/accounting/transactions', params),
@@ -339,6 +352,39 @@ export const purchasingApi = {
 
   // Auto-reorder
   checkReorder: (siteId) => api.post('/purchasing/check-reorder', { siteId }),
+};
+
+// Assets API (Base Registry)
+export const assetsApi = {
+  // Overview & counts
+  getCounts: (params) => api.get('/assets/counts', params),
+  getRecent: (params) => api.get('/assets/recent', params),
+  search: (params) => api.get('/assets/search', params),
+
+  // CRUD
+  list: (params) => api.get('/assets', params),
+  get: (id) => api.get(`/assets/${id}`),
+  create: (data) => api.post('/assets', data),
+  update: (id, data) => api.patch(`/assets/${id}`, data),
+
+  // Status change (dispose/archive)
+  updateStatus: (id, data) => api.post(`/assets/${id}/status`, data),
+};
+
+// Vehicles API
+export const vehiclesApi = {
+  list: (params) => api.get('/vehicles', params),
+  get: (id) => api.get(`/vehicles/${id}`),
+  create: (data) => api.post('/vehicles', data),
+  update: (id, data) => api.patch(`/vehicles/${id}`, data),
+  updateStatus: (id, data) => api.post(`/vehicles/${id}/status`, data),
+};
+
+// Billing API
+export const billingApi = {
+  createCheckoutSession: (data) => api.post('/billing/create-checkout-session', data),
+  getSubscription: (tenantId) => api.get(`/billing/subscription/${tenantId}`),
+  createPortalSession: (data) => api.post('/billing/create-portal-session', data),
 };
 
 // Admin API (superadmin only)

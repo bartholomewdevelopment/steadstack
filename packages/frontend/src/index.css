@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS Safari auto-zoom fix - form inputs must be 16px to prevent zoom */
+@supports (-webkit-touch-callout: none) {
+  @media (hover: none) and (pointer: coarse) {
+    input.text-sm,
+    select.text-sm,
+    textarea.text-sm,
+    input.input,
+    select.input,
+    textarea.input {
+      font-size: 16px !important;
+    }
+  }
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
@@ -30,7 +44,7 @@
   }
 
   .input {
-    @apply block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+    @apply block w-full px-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
   }
 
   .label {
@@ -44,4 +58,20 @@
   .container-narrow {
     @apply max-w-5xl mx-auto px-4 sm:px-6 lg:px-8;
   }
+}
+
+/* Tooltip animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { accountingApi } from '../../../services/api';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const agingBuckets = [
   { key: 'current', label: 'Current', color: 'bg-green-100 text-green-700' },
@@ -65,7 +66,10 @@ export default function AccountsReceivable() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Accounts Receivable</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">Accounts Receivable</h1>
+            <HelpTooltip content="A/R tracks money customers owe you. Create invoices, track payments, and monitor aging to manage cash flow." position="right" />
+          </div>
           <p className="text-gray-600">Track customer invoices and payments</p>
         </div>
         <div className="flex gap-3">
@@ -81,7 +85,10 @@ export default function AccountsReceivable() {
       {/* Aging Summary */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-900">Aging Summary</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">Aging Summary</h2>
+            <HelpTooltip content="Aging shows how long invoices have been outstanding. Older receivables are harder to collect - aim to keep most in 'Current'." position="right" />
+          </div>
           <span className="text-2xl font-bold text-gray-900">{formatCurrency(totalAR)}</span>
         </div>
         <div className="grid grid-cols-5 gap-4">
