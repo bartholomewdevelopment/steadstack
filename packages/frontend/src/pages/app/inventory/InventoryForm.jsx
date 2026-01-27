@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { inventoryApi } from '../../../services/api';
+import { inventoryApi, contactsApi } from '../../../services/api';
 
 export default function InventoryForm() {
   const { id } = useParams();
@@ -12,6 +12,7 @@ export default function InventoryForm() {
   const [error, setError] = useState(null);
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
+  const [vendors, setVendors] = useState([]);
 
   const [form, setForm] = useState({
     name: '',
@@ -36,12 +37,16 @@ export default function InventoryForm() {
 
   const fetchOptions = async () => {
     try {
-      const [categoriesRes, unitsRes] = await Promise.all([
+      const [categoriesRes, unitsRes, vendorsRes] = await Promise.all([
         inventoryApi.getCategories(),
         inventoryApi.getUnits(),
+        contactsApi.list({ type: 'vendor', activeOnly: 'true' }),
       ]);
       setCategories(categoriesRes.data?.categories || categoriesRes.categories || []);
       setUnits(unitsRes.data?.units || unitsRes.units || []);
+      // Sort vendors alphabetically
+      const vendorContacts = vendorsRes.data?.contacts || [];
+      setVendors(vendorContacts.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (err) {
       console.error('Error fetching options:', err);
     }
@@ -332,14 +337,20 @@ export default function InventoryForm() {
 
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Preferred Vendor</label>
-            <input
-              type="text"
+            <select
               name="preferredVendor"
               value={form.preferredVendor}
               onChange={handleChange}
               className="input"
-              placeholder="Vendor name"
-            />
+            >
+              <option value="">-- Select Vendor --</option>
+              {vendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Will auto-fill in requisitions</p>
           </div>
         </div>
 

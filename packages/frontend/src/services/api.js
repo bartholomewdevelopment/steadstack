@@ -334,6 +334,7 @@ export const purchasingApi = {
   getReceipt: (id) => api.get(`/purchasing/receipts/${id}`),
   createReceipt: (data) => api.post('/purchasing/receipts', data),
   postReceipt: (id) => api.post(`/purchasing/receipts/${id}/post`),
+  reprocessFailedReceipts: () => api.post('/purchasing/reprocess-failed-receipts'),
 
   // Vendor Bills
   getBills: (params) => api.get('/purchasing/bills', params),

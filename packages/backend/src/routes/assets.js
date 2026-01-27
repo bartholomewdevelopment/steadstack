@@ -32,7 +32,7 @@ const AssetStatus = {
 
 /**
  * GET /api/assets/counts
- * Get asset counts by type
+ * Get asset counts by type (aggregates from animals, landTracts, and assets collections)
  */
 router.get('/counts', async (req, res) => {
   try {
@@ -44,8 +44,21 @@ router.get('/counts', async (req, res) => {
     const { siteId } = req.query;
     const counts = {};
 
-    // Get counts for each asset type (skipOrder for better performance without composite indexes)
-    for (const type of Object.values(AssetType)) {
+    // Get ANIMAL counts from animals collection
+    const animals = await firestoreService.getAnimals(userData.tenantId, { siteId, status: 'ALL', skipOrder: true });
+    const activeAnimals = animals.filter(a => a.status === 'ACTIVE').length;
+    const inactiveAnimals = animals.filter(a => a.status !== 'ACTIVE').length;
+    counts.ANIMAL = { total: animals.length, active: activeAnimals, inactive: inactiveAnimals };
+
+    // Get LAND counts from landTracts collection
+    const landTracts = await firestoreService.getLandTracts(userData.tenantId, { siteId, status: 'ALL' });
+    const activeLand = landTracts.filter(t => t.status === 'active').length;
+    const inactiveLand = landTracts.filter(t => t.status !== 'active').length;
+    counts.LAND = { total: landTracts.length, active: activeLand, inactive: inactiveLand };
+
+    // Get counts for other asset types from assets collection
+    const otherTypes = Object.values(AssetType).filter(t => t !== 'ANIMAL' && t !== 'LAND');
+    for (const type of otherTypes) {
       const assets = await firestoreService.getAssets(userData.tenantId, { assetType: type, siteId, skipOrder: true });
       const active = assets.filter(a => a.status === 'ACTIVE').length;
       const inactive = assets.filter(a => a.status !== 'ACTIVE').length;
@@ -61,7 +74,7 @@ router.get('/counts', async (req, res) => {
 
 /**
  * GET /api/assets/recent
- * Get recently updated assets
+ * Get recently updated assets (aggregates from animals, landTracts, and assets collections)
  */
 router.get('/recent', async (req, res) => {
   try {
@@ -71,9 +84,52 @@ router.get('/recent', async (req, res) => {
     }
 
     const { siteId, limit = 10 } = req.query;
-    const assets = await firestoreService.getRecentAssets(userData.tenantId, { siteId, limit: parseInt(limit) });
+    const parsedLimit = parseInt(limit);
 
-    res.json({ success: true, assets });
+    // Fetch from all three collections in parallel
+    const [animals, landTracts, genericAssets] = await Promise.all([
+      firestoreService.getAnimals(userData.tenantId, { siteId, status: 'ALL', skipOrder: true }),
+      firestoreService.getLandTracts(userData.tenantId, { siteId, status: 'ALL' }),
+      firestoreService.getRecentAssets(userData.tenantId, { siteId, limit: parsedLimit }),
+    ]);
+
+    // Normalize animals to asset format
+    const normalizedAnimals = animals.map(a => ({
+      id: a.id,
+      name: a.name || a.tagNumber || 'Unnamed Animal',
+      identifier: a.tagNumber || a.visualTag,
+      assetType: 'ANIMAL',
+      status: a.status,
+      siteId: a.siteId,
+      siteName: a.siteName,
+      updatedAt: a.updatedAt,
+      createdAt: a.createdAt,
+    }));
+
+    // Normalize land tracts to asset format
+    const normalizedLand = landTracts.map(t => ({
+      id: t.id,
+      name: t.name,
+      identifier: t.parcelNumber,
+      assetType: 'LAND',
+      status: t.status === 'active' ? 'ACTIVE' : t.status?.toUpperCase(),
+      siteId: t.siteId,
+      siteName: t.siteName,
+      updatedAt: t.updatedAt,
+      createdAt: t.createdAt,
+    }));
+
+    // Combine all assets
+    const allAssets = [...normalizedAnimals, ...normalizedLand, ...genericAssets];
+
+    // Sort by updatedAt descending
+    allAssets.sort((a, b) => {
+      const aTime = a.updatedAt?.toDate?.() || (a.updatedAt?._seconds ? new Date(a.updatedAt._seconds * 1000) : new Date(a.updatedAt || 0));
+      const bTime = b.updatedAt?.toDate?.() || (b.updatedAt?._seconds ? new Date(b.updatedAt._seconds * 1000) : new Date(b.updatedAt || 0));
+      return bTime - aTime;
+    });
+
+    res.json({ success: true, assets: allAssets.slice(0, parsedLimit) });
   } catch (error) {
     console.error('Error fetching recent assets:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch recent assets' });
@@ -82,7 +138,7 @@ router.get('/recent', async (req, res) => {
 
 /**
  * GET /api/assets/search
- * Search assets by name, identifier, or tags
+ * Search assets by name, identifier, or tags (aggregates from animals, landTracts, and assets)
  */
 router.get('/search', async (req, res) => {
   try {
@@ -97,13 +153,58 @@ router.get('/search', async (req, res) => {
       return res.json({ success: true, assets: [] });
     }
 
-    const assets = await firestoreService.searchAssets(userData.tenantId, {
-      query: searchQuery.trim(),
-      siteId,
-      limit: parseInt(limit),
-    });
+    const parsedLimit = parseInt(limit);
+    const searchLower = searchQuery.trim().toLowerCase();
 
-    res.json({ success: true, assets });
+    // Fetch from all collections in parallel
+    const [animals, landTracts, genericAssets] = await Promise.all([
+      firestoreService.getAnimals(userData.tenantId, { siteId, status: 'ALL', skipOrder: true }),
+      firestoreService.getLandTracts(userData.tenantId, { siteId, status: 'ALL' }),
+      firestoreService.searchAssets(userData.tenantId, { query: searchQuery.trim(), siteId, limit: parsedLimit }),
+    ]);
+
+    // Filter and normalize animals
+    const matchingAnimals = animals
+      .filter(a =>
+        a.name?.toLowerCase().includes(searchLower) ||
+        a.tagNumber?.toLowerCase().includes(searchLower) ||
+        a.visualTag?.toLowerCase().includes(searchLower) ||
+        a.species?.toLowerCase().includes(searchLower) ||
+        a.breed?.toLowerCase().includes(searchLower)
+      )
+      .map(a => ({
+        id: a.id,
+        name: a.name || a.tagNumber || 'Unnamed Animal',
+        identifier: a.tagNumber || a.visualTag,
+        assetType: 'ANIMAL',
+        status: a.status,
+        siteId: a.siteId,
+        siteName: a.siteName,
+        updatedAt: a.updatedAt,
+      }));
+
+    // Filter and normalize land tracts
+    const matchingLand = landTracts
+      .filter(t =>
+        t.name?.toLowerCase().includes(searchLower) ||
+        t.parcelNumber?.toLowerCase().includes(searchLower) ||
+        t.type?.toLowerCase().includes(searchLower)
+      )
+      .map(t => ({
+        id: t.id,
+        name: t.name,
+        identifier: t.parcelNumber,
+        assetType: 'LAND',
+        status: t.status === 'active' ? 'ACTIVE' : t.status?.toUpperCase(),
+        siteId: t.siteId,
+        siteName: t.siteName,
+        updatedAt: t.updatedAt,
+      }));
+
+    // Combine all results
+    const allAssets = [...matchingAnimals, ...matchingLand, ...genericAssets];
+
+    res.json({ success: true, assets: allAssets.slice(0, parsedLimit) });
   } catch (error) {
     console.error('Error searching assets:', error);
     res.status(500).json({ success: false, message: 'Failed to search assets' });
@@ -211,8 +312,8 @@ router.post(
         ...req.body,
         tenantId: userData.tenantId,
         status: req.body.status || 'ACTIVE',
-        createdBy: userData.id,
-        updatedBy: userData.id,
+        createdBy: userData.user.id,
+        updatedBy: userData.user.id,
       };
 
       const asset = await firestoreService.createAsset(userData.tenantId, assetData);
@@ -246,7 +347,7 @@ router.patch(
 
       const updateData = {
         ...req.body,
-        updatedBy: userData.id,
+        updatedBy: userData.user.id,
       };
 
       const asset = await firestoreService.updateAsset(userData.tenantId, req.params.id, updateData);
@@ -285,7 +386,7 @@ router.post(
 
       const updateData = {
         status,
-        updatedBy: userData.id,
+        updatedBy: userData.user.id,
       };
 
       if (status !== 'ACTIVE') {

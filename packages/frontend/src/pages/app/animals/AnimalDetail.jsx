@@ -3,12 +3,27 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { animalsApi, sitesApi } from '../../../services/api';
 
 const speciesIcons = {
+  // Large livestock
   cattle: '🐄',
+  horse: '🐴',
+  donkey: '🫏',
+  mule: '🫏',
+  // Small livestock
   sheep: '🐑',
   goat: '🐐',
   pig: '🐷',
-  horse: '🐴',
-  poultry: '🐔',
+  llama: '🦙',
+  alpaca: '🦙',
+  // Poultry
+  chicken: '🐔',
+  turkey: '🦃',
+  duck: '🦆',
+  goose: '🦢',
+  guinea_fowl: '🐔',
+  quail: '🐦',
+  // Other
+  rabbit: '🐰',
+  bee: '🐝',
   other: '🐾',
 };
 
@@ -26,6 +41,8 @@ export default function AnimalDetail() {
   const [animal, setAnimal] = useState(null);
   const [site, setSite] = useState(null);
   const [group, setGroup] = useState(null);
+  const [sire, setSire] = useState(null);
+  const [dam, setDam] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -47,6 +64,8 @@ export default function AnimalDetail() {
       // Fetch site and group names if we have IDs
       const siteId = animalData?.siteId?.id || (typeof animalData?.siteId === 'string' ? animalData.siteId : null);
       const groupId = animalData?.groupId?.id || (typeof animalData?.groupId === 'string' ? animalData.groupId : null);
+      const sireId = animalData?.sireId?.id || (typeof animalData?.sireId === 'string' ? animalData.sireId : null);
+      const damId = animalData?.damId?.id || (typeof animalData?.damId === 'string' ? animalData.damId : null);
 
       // Fetch related data in parallel
       const promises = [];
@@ -62,6 +81,20 @@ export default function AnimalDetail() {
           animalsApi.getGroup(groupId)
             .then(res => setGroup(res.data?.group || res.group || res.data))
             .catch(() => setGroup(null))
+        );
+      }
+      if (sireId) {
+        promises.push(
+          animalsApi.get(sireId)
+            .then(res => setSire(res.data?.animal || res.animal || res.data))
+            .catch(() => setSire(null))
+        );
+      }
+      if (damId) {
+        promises.push(
+          animalsApi.get(damId)
+            .then(res => setDam(res.data?.animal || res.animal || res.data))
+            .catch(() => setDam(null))
         );
       }
       await Promise.all(promises);
@@ -378,34 +411,34 @@ export default function AnimalDetail() {
           </div>
 
           {/* Lineage */}
-          {(animal.sireId || animal.damId) && (
+          {(sire || dam) && (
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h3 className="font-semibold text-gray-900 mb-4">Lineage</h3>
               <dl className="space-y-3">
-                {animal.sireId && (
+                {sire && (
                   <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase">Sire</dt>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Sire (Father)</dt>
                     <dd className="mt-1">
                       <Link
-                        to={`/app/animals/${animal.sireId._id}`}
+                        to={`/app/assets/animals/${sire.id}`}
                         className="text-red-600 hover:text-red-700 font-medium"
                       >
-                        {animal.sireId.tagNumber}
-                        {animal.sireId.name && ` (${animal.sireId.name})`}
+                        {sire.tagNumber}
+                        {sire.name && ` (${sire.name})`}
                       </Link>
                     </dd>
                   </div>
                 )}
-                {animal.damId && (
+                {dam && (
                   <div>
-                    <dt className="text-xs font-medium text-gray-500 uppercase">Dam</dt>
+                    <dt className="text-xs font-medium text-gray-500 uppercase">Dam (Mother)</dt>
                     <dd className="mt-1">
                       <Link
-                        to={`/app/animals/${animal.damId._id}`}
+                        to={`/app/assets/animals/${dam.id}`}
                         className="text-red-600 hover:text-red-700 font-medium"
                       >
-                        {animal.damId.tagNumber}
-                        {animal.damId.name && ` (${animal.damId.name})`}
+                        {dam.tagNumber}
+                        {dam.name && ` (${dam.name})`}
                       </Link>
                     </dd>
                   </div>

@@ -12,6 +12,7 @@ export default function AnimalForm() {
   const [error, setError] = useState(null);
   const [groups, setGroups] = useState([]);
   const [sites, setSites] = useState([]);
+  const [animals, setAnimals] = useState([]);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [newGroup, setNewGroup] = useState({ name: '', type: 'herd', species: 'cattle' });
   const [savingGroup, setSavingGroup] = useState(false);
@@ -38,6 +39,8 @@ export default function AnimalForm() {
       notes: '',
     },
     notes: '',
+    sireId: '',
+    damId: '',
   });
 
   useEffect(() => {
@@ -49,12 +52,14 @@ export default function AnimalForm() {
 
   const fetchOptions = async () => {
     try {
-      const [groupsRes, sitesRes] = await Promise.all([
+      const [groupsRes, sitesRes, animalsRes] = await Promise.all([
         animalsApi.listGroups({}),
         sitesApi.list(),
+        animalsApi.list({ limit: 1000, status: 'active' }),
       ]);
       setGroups(groupsRes.data?.groups || []);
       setSites(sitesRes.data?.sites || []);
+      setAnimals(animalsRes.data?.animals || []);
     } catch (err) {
       console.error('Error fetching options:', err);
     }
@@ -110,6 +115,8 @@ export default function AnimalForm() {
           notes: '',
         },
         notes: animal.notes || '',
+        sireId: animal.sireId?.id || animal.sireId || '',
+        damId: animal.damId?.id || animal.damId || '',
       });
     } catch (err) {
       setError(err.message);
@@ -186,6 +193,8 @@ export default function AnimalForm() {
         },
         groupId: form.groupId || null,
         siteId: form.siteId || undefined,
+        sireId: form.sireId || null,
+        damId: form.damId || null,
       };
 
       // Remove empty strings
@@ -286,13 +295,32 @@ export default function AnimalForm() {
                 required
                 className="input"
               >
-                <option value="cattle">Cattle</option>
-                <option value="sheep">Sheep</option>
-                <option value="goat">Goat</option>
-                <option value="pig">Pig</option>
-                <option value="horse">Horse</option>
-                <option value="poultry">Poultry</option>
-                <option value="other">Other</option>
+                <optgroup label="Large Livestock">
+                  <option value="cattle">Cattle</option>
+                  <option value="horse">Horse</option>
+                  <option value="donkey">Donkey</option>
+                  <option value="mule">Mule</option>
+                </optgroup>
+                <optgroup label="Small Livestock">
+                  <option value="sheep">Sheep</option>
+                  <option value="goat">Goat</option>
+                  <option value="pig">Pig</option>
+                  <option value="llama">Llama</option>
+                  <option value="alpaca">Alpaca</option>
+                </optgroup>
+                <optgroup label="Poultry">
+                  <option value="chicken">Chicken</option>
+                  <option value="turkey">Turkey</option>
+                  <option value="duck">Duck</option>
+                  <option value="goose">Goose</option>
+                  <option value="guinea_fowl">Guinea Fowl</option>
+                  <option value="quail">Quail</option>
+                </optgroup>
+                <optgroup label="Other Animals">
+                  <option value="rabbit">Rabbit</option>
+                  <option value="bee">Bee (Hive)</option>
+                  <option value="other">Other</option>
+                </optgroup>
               </select>
             </div>
 
@@ -427,6 +455,86 @@ export default function AnimalForm() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Lineage */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Lineage</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Select the parents of this animal from your herd
+          </p>
+
+          {!form.siteId ? (
+            <p className="text-sm text-amber-600">Select a site first to see available animals</p>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Sire (Father)
+                </label>
+                <select
+                  name="sireId"
+                  value={form.sireId}
+                  onChange={handleChange}
+                  className="input"
+                >
+                  <option value="">Unknown / Not in herd</option>
+                  {animals
+                    .filter(
+                      (animal) =>
+                        animal.species === form.species &&
+                        animal.gender === 'male' &&
+                        animal.id !== id &&
+                        (animal.siteId === form.siteId || animal.siteId?.id === form.siteId) &&
+                        (!form.groupId || animal.groupId === form.groupId || animal.groupId?.id === form.groupId)
+                    )
+                    .map((animal) => (
+                      <option key={animal.id} value={animal.id}>
+                        {animal.tagNumber}
+                        {animal.name ? ` - ${animal.name}` : ''}
+                        {animal.breed ? ` (${animal.breed})` : ''}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  Male animals at this location
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Dam (Mother)
+                </label>
+                <select
+                  name="damId"
+                  value={form.damId}
+                  onChange={handleChange}
+                  className="input"
+                >
+                  <option value="">Unknown / Not in herd</option>
+                  {animals
+                    .filter(
+                      (animal) =>
+                        animal.species === form.species &&
+                        animal.gender === 'female' &&
+                        animal.id !== id &&
+                        (animal.siteId === form.siteId || animal.siteId?.id === form.siteId) &&
+                        (!form.groupId || animal.groupId === form.groupId || animal.groupId?.id === form.groupId)
+                    )
+                    .map((animal) => (
+                      <option key={animal.id} value={animal.id}>
+                        {animal.tagNumber}
+                        {animal.name ? ` - ${animal.name}` : ''}
+                        {animal.breed ? ` (${animal.breed})` : ''}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  Female animals at this location
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Physical Attributes */}

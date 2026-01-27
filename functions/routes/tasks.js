@@ -424,9 +424,25 @@ router.post(
 
       const runlist = await firestoreService.activateRunlist(userData.tenantId, req.params.id);
 
+      // Auto-generate today's task occurrences for this runlist
+      let generatedOccurrences = [];
+      try {
+        generatedOccurrences = await firestoreService.generateTaskOccurrencesForDate(
+          userData.tenantId,
+          new Date(),
+          req.firebaseUser.uid
+        );
+      } catch (genError) {
+        console.error('Error auto-generating tasks on activation:', genError);
+        // Don't fail the activation if generation fails
+      }
+
       res.json({
         success: true,
-        data: { runlist },
+        data: {
+          runlist,
+          generatedTasks: generatedOccurrences.length,
+        },
       });
     } catch (error) {
       console.error('Error activating runlist:', error);
@@ -715,6 +731,52 @@ router.get('/occurrences/today', async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch today\'s tasks' });
   }
 });
+
+/**
+ * POST /api/tasks/occurrences/reorder
+ * Reorder task occurrences (update sortOrder and optionally runlistId)
+ */
+router.post(
+  '/occurrences/reorder',
+  [
+    body('scheduledDate').notEmpty().withMessage('Scheduled date is required'),
+    body('orderedTasks').isArray({ min: 1 }).withMessage('Ordered tasks array is required'),
+    body('orderedTasks.*.id').notEmpty().withMessage('Task ID is required'),
+    body('orderedTasks.*.sortOrder').isNumeric().withMessage('Sort order must be a number'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
+
+      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      if (!userData) {
+        return res.status(403).json({ success: false, message: 'User not found' });
+      }
+
+      const { scheduledDate, orderedTasks } = req.body;
+
+      const result = await firestoreService.reorderTaskOccurrences(
+        userData.tenantId,
+        scheduledDate,
+        orderedTasks
+      );
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      console.error('Error reordering tasks:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to reorder tasks',
+      });
+    }
+  }
+);
 
 /**
  * GET /api/tasks/occurrences/:id

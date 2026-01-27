@@ -261,18 +261,6 @@ export default function ContactForm() {
                 placeholder="(555) 555-5555"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Labor Rate ($/hr)</label>
-              <input
-                type="number"
-                value={form.laborRate}
-                onChange={(e) => setForm({ ...form, laborRate: e.target.value })}
-                className="input"
-                placeholder="0.00"
-                min="0"
-                step="0.01"
-              />
-            </div>
           </div>
         </div>
 
@@ -382,6 +370,24 @@ export default function ContactForm() {
                   onChange={(e) => setForm({ ...form, hireDate: e.target.value })}
                   className="input"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hourly Rate ($)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                  <input
+                    type="number"
+                    value={form.laborRate}
+                    onChange={(e) => setForm({ ...form, laborRate: e.target.value })}
+                    className="input pl-7"
+                    placeholder="0.00"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Used for calculating labor costs</p>
               </div>
             </div>
           </div>

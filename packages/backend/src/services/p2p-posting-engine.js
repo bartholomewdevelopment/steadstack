@@ -4,7 +4,8 @@
  * Also handles inventory movements
  */
 
-const { db, FieldValue } = require('./firestore');
+const { db, admin } = require('../config/firebase-admin');
+const { FieldValue } = admin.firestore;
 const { P2PEventType } = require('../models/p2p-schemas');
 
 // ============================================
@@ -181,12 +182,13 @@ const buildPaymentPostingEntries = (event, accounts) => {
 /**
  * Create inventory movements for a receipt
  * Increases inventory quantity and updates average cost
+ *
+ * IMPORTANT: Firestore transactions require all reads before writes.
  */
 const createInventoryMovements = async (tenantId, event, transaction) => {
   // siteId is at event level, lines is in payload
   const siteId = event.siteId || event.payload.siteId;
   const { lines } = event.payload;
-  const movements = [];
 
   if (!siteId) {
     throw new Error('siteId is required for inventory movements');
@@ -198,16 +200,35 @@ const createInventoryMovements = async (tenantId, event, transaction) => {
 
   console.log(`[P2P Posting] Processing ${lines.length} inventory movements for site ${siteId}`);
 
+  // Step 1: validate and collect balance refs
+  const balanceRefs = [];
   for (const line of lines) {
-    // Validate required fields
     if (!line.itemId) {
       console.error('[P2P Posting] Line missing itemId:', JSON.stringify(line));
-      throw new Error(`Line is missing itemId`);
+      throw new Error('Line is missing itemId');
     }
     if (typeof line.qtyReceived !== 'number' || line.qtyReceived <= 0) {
       console.error('[P2P Posting] Line has invalid qtyReceived:', line.qtyReceived);
       throw new Error(`Line has invalid qtyReceived: ${line.qtyReceived}`);
     }
+
+    const balanceRef = db.collection('tenants').doc(tenantId)
+      .collection('sites').doc(siteId)
+      .collection('inventory').doc(line.itemId);
+    balanceRefs.push(balanceRef);
+  }
+
+  // Step 2: read all balances first
+  const balanceDocs = await Promise.all(
+    balanceRefs.map(ref => transaction.get(ref))
+  );
+
+  // Step 3: write movements and update balances
+  const movements = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const balanceRef = balanceRefs[i];
+    const balanceDoc = balanceDocs[i];
 
     console.log(`[P2P Posting] Updating inventory for item ${line.itemId}, qty: ${line.qtyReceived}`);
     const movementRef = db.collection('tenants').doc(tenantId)
@@ -233,13 +254,6 @@ const createInventoryMovements = async (tenantId, event, transaction) => {
 
     transaction.set(movementRef, movement);
     movements.push({ id: movementRef.id, ...movement });
-
-    // Update inventory balance
-    const balanceRef = db.collection('tenants').doc(tenantId)
-      .collection('sites').doc(siteId)
-      .collection('inventory').doc(line.itemId);
-
-    const balanceDoc = await transaction.get(balanceRef);
 
     if (balanceDoc.exists) {
       const currentBalance = balanceDoc.data();

@@ -481,7 +481,7 @@ const InventoryCategory = {
  */
 const createInventoryItem = async (tenantId, itemData, createdBy) => {
   const {
-    sku,
+    sku: providedSku,
     name,
     description,
     category,
@@ -493,12 +493,17 @@ const createInventoryItem = async (tenantId, itemData, createdBy) => {
     glAccountCode,
   } = itemData;
 
+  // Auto-generate SKU if not provided
+  const sku = providedSku
+    ? providedSku.toUpperCase()
+    : `ITEM-${Date.now().toString(36).toUpperCase()}`;
+
   // Check for duplicate SKU
   const existingItem = await db
     .collection('tenants')
     .doc(tenantId)
     .collection('inventoryItems')
-    .where('sku', '==', sku.toUpperCase())
+    .where('sku', '==', sku)
     .limit(1)
     .get();
 
@@ -513,7 +518,7 @@ const createInventoryItem = async (tenantId, itemData, createdBy) => {
     .doc();
 
   const item = {
-    sku: sku.toUpperCase(),
+    sku,
     name,
     description: description || null,
     category: category || InventoryCategory.OTHER,
@@ -1067,12 +1072,29 @@ const checkReorderNeeded = async (tenantId, siteId, itemId) => {
  * Animal species types (lowercase to match frontend)
  */
 const AnimalSpecies = {
+  // Large livestock
   CATTLE: 'cattle',
+  HORSE: 'horse',
+  DONKEY: 'donkey',
+  MULE: 'mule',
+  // Small livestock
   SHEEP: 'sheep',
   GOAT: 'goat',
   PIG: 'pig',
-  HORSE: 'horse',
-  POULTRY: 'poultry',
+  LLAMA: 'llama',
+  ALPACA: 'alpaca',
+  // Poultry - specific types
+  CHICKEN: 'chicken',
+  TURKEY: 'turkey',
+  DUCK: 'duck',
+  GOOSE: 'goose',
+  GUINEA_FOWL: 'guinea_fowl',
+  QUAIL: 'quail',
+  // Small animals
+  RABBIT: 'rabbit',
+  // Apiary
+  BEE: 'bee',
+  // Other
   OTHER: 'other',
 };
 
@@ -1370,14 +1392,19 @@ const createAnimal = async (tenantId, animalData, createdBy) => {
  * Get animals for a tenant with filters
  */
 const getAnimals = async (tenantId, options = {}) => {
-  const { siteId, groupId, species, status, search, limit = 50, startAfter } = options;
+  const { siteId, groupId, species, status, search, limit = 50, startAfter, skipOrder } = options;
 
   let query = db
     .collection('tenants')
     .doc(tenantId)
     .collection('animals');
 
-  if (status) {
+  // status: 'ALL' returns all animals regardless of status
+  // status: null/undefined defaults to ACTIVE only
+  // status: 'ACTIVE', 'SOLD', etc. filters by that specific status
+  if (status === 'ALL') {
+    // No status filter - return all
+  } else if (status) {
     query = query.where('status', '==', status);
   } else {
     query = query.where('status', '==', AnimalStatus.ACTIVE);
@@ -1395,7 +1422,10 @@ const getAnimals = async (tenantId, options = {}) => {
     query = query.where('species', '==', species);
   }
 
-  query = query.orderBy('tagNumber');
+  // Skip ordering to avoid composite index requirement for counts/aggregation queries
+  if (!skipOrder) {
+    query = query.orderBy('tagNumber');
+  }
 
   if (startAfter) {
     const startDoc = await db
@@ -1726,6 +1756,7 @@ const TaskCategory = {
   CLEANING: 'CLEANING',
   HARVESTING: 'HARVESTING',
   PLANTING: 'PLANTING',
+  WEEDING: 'WEEDING',
   IRRIGATION: 'IRRIGATION',
   PEST_CONTROL: 'PEST_CONTROL',
   EQUIPMENT: 'EQUIPMENT',
@@ -1757,6 +1788,7 @@ const createTaskTemplate = async (tenantId, templateData, createdBy) => {
     category,
     priority,
     estimatedDurationMinutes,
+    landTractId,
     instructions,
     requiredSkills,
     requiredEquipment,
@@ -1794,6 +1826,7 @@ const createTaskTemplate = async (tenantId, templateData, createdBy) => {
     category: category || TaskCategory.OTHER,
     priority: priority || TaskPriority.MEDIUM,
     estimatedDurationMinutes: estimatedDurationMinutes || 30,
+    landTractId: landTractId || null, // Optional: where the task will be performed
     instructions: instructions || null,
     requiredSkills: requiredSkills || [],
     requiredEquipment: requiredEquipment || [],
@@ -2219,6 +2252,8 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     // Override name/description for ad-hoc tasks
     name: customName,
     description: customDescription,
+    // Sort order for manual reordering
+    sortOrder,
   } = occurrenceData;
 
   // Get template for defaults
@@ -2268,6 +2303,8 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     posted: false,
     postedAt: null,
     ledgerTransactionId: null,
+    // Sort order for manual reordering (null = use default ordering)
+    sortOrder: sortOrder ?? null,
     // Standard fields
     startedAt: null,
     completedAt: null,
@@ -2363,6 +2400,17 @@ const getTaskOccurrences = async (tenantId, options = {}) => {
       return { ...occ, isOverdue: false };
     });
   }
+
+  // Sort by sortOrder within each date (null sortOrders go last)
+  occurrences.sort((a, b) => {
+    const dateA = a.scheduledDate?.toDate ? a.scheduledDate.toDate() : new Date(a.scheduledDate);
+    const dateB = b.scheduledDate?.toDate ? b.scheduledDate.toDate() : new Date(b.scheduledDate);
+    const dateCompare = dateA - dateB;
+    if (dateCompare !== 0) return dateCompare;
+    const orderA = a.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    const orderB = b.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    return orderA - orderB;
+  });
 
   return occurrences;
 };
@@ -2535,6 +2583,40 @@ const reassignTaskOccurrence = async (tenantId, occurrenceId, newAssigneeId) => 
 };
 
 /**
+ * Reorder task occurrences (supports cross-group moves)
+ * @param {string} tenantId
+ * @param {string} scheduledDate - ISO date string (YYYY-MM-DD)
+ * @param {Array<{id: string, sortOrder: number, runlistId: string|null}>} orderedTasks
+ */
+const reorderTaskOccurrences = async (tenantId, scheduledDate, orderedTasks) => {
+  const batch = db.batch();
+
+  for (const { id, sortOrder, runlistId } of orderedTasks) {
+    const occRef = db
+      .collection('tenants')
+      .doc(tenantId)
+      .collection('taskOccurrences')
+      .doc(id);
+
+    const updates = {
+      sortOrder,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    // If runlistId is provided, update it (supports moving between groups)
+    if (runlistId !== undefined) {
+      updates.runlistId = runlistId;
+    }
+
+    batch.update(occRef, updates);
+  }
+
+  await batch.commit();
+
+  return { success: true, updated: orderedTasks.length };
+};
+
+/**
  * Get task statistics for a tenant
  */
 const getTaskStats = async (tenantId, options = {}) => {
@@ -2646,7 +2728,8 @@ const generateTaskOccurrencesForDate = async (tenantId, targetDate, createdBy) =
     }
 
     // Get templates for this runlist
-    for (const templateId of runlist.templateIds) {
+    const templateIds = runlist.templateIds || [];
+    for (const templateId of templateIds) {
       const template = await getTaskTemplate(tenantId, templateId);
       if (!template || !template.active) continue;
 
@@ -2654,6 +2737,12 @@ const generateTaskOccurrencesForDate = async (tenantId, targetDate, createdBy) =
       const shouldGenerate = checkRecurrenceMatch(template.recurrence, target, startDate);
 
       if (shouldGenerate) {
+        // Normalize target date to start of day for comparison
+        const startOfDay = new Date(target);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(target);
+        endOfDay.setHours(23, 59, 59, 999);
+
         // Check if occurrence already exists for this date/template/runlist
         const existingOccurrence = await db
           .collection('tenants')
@@ -2661,11 +2750,16 @@ const generateTaskOccurrencesForDate = async (tenantId, targetDate, createdBy) =
           .collection('taskOccurrences')
           .where('templateId', '==', templateId)
           .where('runlistId', '==', runlist.id)
-          .where('scheduledDate', '==', target)
+          .where('scheduledDate', '>=', startOfDay)
+          .where('scheduledDate', '<=', endOfDay)
           .limit(1)
           .get();
 
         if (existingOccurrence.empty) {
+          // Normalize scheduled date to start of day
+          const normalizedScheduledDate = new Date(target);
+          normalizedScheduledDate.setHours(0, 0, 0, 0);
+
           // Calculate due date (end of day by default)
           const dueDate = new Date(target);
           dueDate.setHours(23, 59, 59, 999);
@@ -2676,7 +2770,7 @@ const generateTaskOccurrencesForDate = async (tenantId, targetDate, createdBy) =
               templateId,
               runlistId: runlist.id,
               siteId: runlist.siteId || template.siteIds?.[0] || null,
-              scheduledDate: target,
+              scheduledDate: normalizedScheduledDate,
               scheduledTime: runlist.scheduleTime || '08:00',
               dueDate,
               assignedToUserId: runlist.defaultAssigneeId || template.defaultAssigneeId || null,
@@ -3500,6 +3594,7 @@ module.exports = {
   skipTaskOccurrence,
   cancelTaskOccurrence,
   reassignTaskOccurrence,
+  reorderTaskOccurrences,
   getTaskStats,
 
   // Task Generation

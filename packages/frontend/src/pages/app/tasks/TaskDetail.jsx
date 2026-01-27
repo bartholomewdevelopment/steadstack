@@ -12,6 +12,7 @@ const categoryIcons = {
   CLEANING: '🧹',
   HARVESTING: '🌾',
   PLANTING: '🌱',
+  WEEDING: '🌿',
   IRRIGATION: '💦',
   PEST_CONTROL: '🐛',
   EQUIPMENT: '⚙️',

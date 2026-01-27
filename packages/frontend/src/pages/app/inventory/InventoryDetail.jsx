@@ -69,18 +69,36 @@ export default function InventoryDetail() {
     }).format(amount || 0);
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return 'N/A';
-    return new Date(dateStr).toLocaleDateString('en-US', {
+  const formatDate = (dateVal) => {
+    if (!dateVal) return 'N/A';
+    let date;
+    if (dateVal.toDate) {
+      date = dateVal.toDate();
+    } else if (dateVal._seconds) {
+      date = new Date(dateVal._seconds * 1000);
+    } else {
+      date = new Date(dateVal);
+    }
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     });
   };
 
-  const formatDateTime = (dateStr) => {
-    if (!dateStr) return 'N/A';
-    return new Date(dateStr).toLocaleString('en-US', {
+  const formatDateTime = (dateVal) => {
+    if (!dateVal) return 'N/A';
+    let date;
+    if (dateVal.toDate) {
+      date = dateVal.toDate();
+    } else if (dateVal._seconds) {
+      date = new Date(dateVal._seconds * 1000);
+    } else {
+      date = new Date(dateVal);
+    }
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',

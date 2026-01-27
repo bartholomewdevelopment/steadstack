@@ -1,4 +1,4 @@
-// SteadStack FARMS API - v1.0.1
+// SteadStack FARMS API - v1.0.2
 const { onRequest } = require('firebase-functions/v2/https');
 const express = require('express');
 const mongoose = require('mongoose');

@@ -4,12 +4,19 @@ import { AssetStatusBadge } from '../../../../components/assets';
 import { vehiclesApi } from '../../../../services/api';
 
 const vehicleTypeIcons = {
-  TRUCK: '🚚',
-  TRACTOR: '🚜',
   ATV: '🏍️',
-  UTV: '🛻',
-  TRAILER: '🚛',
+  BACKHOE: '🏗️',
+  CAR: '🚗',
+  FORKLIFT: '🏭',
+  GOLF_CART: '🛺',
   IMPLEMENT: '🔩',
+  SKID_STEER: '🚧',
+  SUV: '🚙',
+  TRACTOR: '🚜',
+  TRAILER: '🚛',
+  TRUCK: '🚚',
+  UTV: '🛻',
+  VAN: '🚐',
   OTHER: '🚗',
 };
 

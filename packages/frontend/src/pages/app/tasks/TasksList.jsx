@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
-import { tasksApi } from '../../../services/api';
+import { tasksApi, landTractsApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const categoryIcons = {
@@ -14,6 +14,7 @@ const categoryIcons = {
   CLEANING: '🧹',
   HARVESTING: '🌾',
   PLANTING: '🌱',
+  WEEDING: '🌿',
   IRRIGATION: '💦',
   PEST_CONTROL: '🐛',
   EQUIPMENT: '⚙️',
@@ -33,6 +34,7 @@ export default function TasksList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [landTractsMap, setLandTractsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -42,7 +44,24 @@ export default function TasksList() {
 
   useEffect(() => {
     fetchCategories();
+    fetchLandTracts();
   }, []);
+
+  const fetchLandTracts = async () => {
+    try {
+      const response = await landTractsApi.list({ limit: 100 });
+      const tracts = response?.data?.tracts || response?.tracts || [];
+      // Create a lookup map for quick access
+      const map = {};
+      tracts.forEach((tract) => {
+        const id = tract.id || tract._id;
+        map[id] = tract.name;
+      });
+      setLandTractsMap(map);
+    } catch (err) {
+      console.error('Failed to fetch land tracts:', err);
+    }
+  };
 
   useEffect(() => {
     if (currentSite?.id) {
@@ -247,6 +266,9 @@ export default function TasksList() {
                     Category
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Location
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Priority
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -286,6 +308,19 @@ export default function TasksList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {template.category?.replace(/_/g, ' ').toLowerCase()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {template.landTractId ? (
+                        <span className="inline-flex items-center gap-1">
+                          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                          </svg>
+                          {landTractsMap[template.landTractId] || 'Unknown'}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 text-xs font-medium rounded ${priorityColors[template.priority]}`}>

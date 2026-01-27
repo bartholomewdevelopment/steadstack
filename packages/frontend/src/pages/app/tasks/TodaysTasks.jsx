@@ -1,7 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
 import { tasksApi } from '../../../services/api';
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const categoryIcons = {
   FEEDING: '🍽️',
@@ -13,6 +30,7 @@ const categoryIcons = {
   CLEANING: '🧹',
   HARVESTING: '🌾',
   PLANTING: '🌱',
+  WEEDING: '🌿',
   IRRIGATION: '💦',
   PEST_CONTROL: '🐛',
   EQUIPMENT: '⚙️',
@@ -44,14 +62,199 @@ const eventTypeOptions = [
   { value: 'custom', label: 'Other', icon: '📝' },
 ];
 
-const statusColors = {
-  SCHEDULED: 'bg-gray-100 text-gray-600',
-  IN_PROGRESS: 'bg-blue-100 text-blue-700',
-  COMPLETED: 'bg-green-100 text-green-700',
-  SKIPPED: 'bg-gray-100 text-gray-500',
-  CANCELLED: 'bg-red-100 text-red-600',
-  OVERDUE: 'bg-red-100 text-red-700',
-};
+// Sortable Task Item Component
+function SortableTaskItem({
+  task,
+  actionLoading,
+  onStart,
+  onComplete,
+  onSkip,
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-3 p-4 bg-white border-b border-gray-100 last:border-b-0 ${
+        isDragging ? 'shadow-lg ring-2 ring-primary-400 rounded-lg z-10' : ''
+      } ${task.status === 'COMPLETED' ? 'bg-green-50/50' : ''} ${
+        task.status === 'OVERDUE' ? 'bg-red-50/50' : ''
+      }`}
+    >
+      {/* Drag Handle */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="flex-shrink-0 p-1 text-gray-400 hover:text-gray-600 cursor-grab active:cursor-grabbing touch-none"
+        title="Drag to reorder"
+      >
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
+        </svg>
+      </button>
+
+      {/* Status/Action Button */}
+      <div className="flex-shrink-0">
+        {task.status === 'COMPLETED' ? (
+          <div className="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </div>
+        ) : task.status === 'SKIPPED' ? (
+          <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+        ) : (
+          <button
+            onClick={() => task.status === 'IN_PROGRESS' ? onComplete(task) : onStart(task.id)}
+            disabled={actionLoading === task.id}
+            className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
+              task.status === 'IN_PROGRESS'
+                ? 'border-blue-500 bg-blue-100 text-blue-600'
+                : 'border-gray-300 hover:border-primary-500 hover:bg-primary-50'
+            }`}
+          >
+            {actionLoading === task.id ? (
+              <div className="w-4 h-4 border-2 border-gray-300 border-t-primary-500 rounded-full animate-spin" />
+            ) : task.status === 'IN_PROGRESS' ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+            ) : null}
+          </button>
+        )}
+      </div>
+
+      {/* Task Info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          {task.isEvent ? (
+            <span className="text-lg">⭐</span>
+          ) : (
+            <span className="text-lg">{categoryIcons[task.category] || '📝'}</span>
+          )}
+          <span
+            className={`font-medium ${
+              task.status === 'COMPLETED' ? 'text-gray-500 line-through' : 'text-gray-900'
+            }`}
+          >
+            {task.name}
+          </span>
+          {task.isEvent && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
+              {eventTypeOptions.find(e => e.value === task.eventType)?.label || 'Event'}
+            </span>
+          )}
+          {task.status === 'OVERDUE' && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded">
+              Overdue
+            </span>
+          )}
+          {task.posted && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              Posted
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 mt-1 text-sm text-gray-500 flex-wrap">
+          <span className={`px-2 py-0.5 text-xs font-medium rounded ${priorityColors[task.priority]}`}>
+            {task.priority}
+          </span>
+          {task.estimatedDurationMinutes && (
+            <span>{task.estimatedDurationMinutes} min</span>
+          )}
+          {task.scheduledTime && <span>{task.scheduledTime}</span>}
+          {task.isEvent && task.totalCost > 0 && (
+            <span className="text-amber-600 font-medium">${task.totalCost.toFixed(2)}</span>
+          )}
+          {task.isEvent && task.totalRevenue > 0 && (
+            <span className="text-green-600 font-medium">+${task.totalRevenue.toFixed(2)}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      {!['COMPLETED', 'SKIPPED', 'CANCELLED'].includes(task.status) && (
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {task.status === 'IN_PROGRESS' && (
+            <button
+              onClick={() => onComplete(task)}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700"
+            >
+              Complete
+            </button>
+          )}
+          <button
+            onClick={() => onSkip(task)}
+            className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+          >
+            Skip
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Task Item for Drag Overlay (non-interactive preview)
+function TaskDragPreview({ task }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-lg shadow-xl opacity-90">
+      <div className="flex-shrink-0 p-1 text-gray-400">
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
+        </svg>
+      </div>
+      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+        {task.isEvent ? '⭐' : categoryIcons[task.category] || '📝'}
+      </div>
+      <span className="font-medium text-gray-900">{task.name}</span>
+    </div>
+  );
+}
+
+// Droppable Group Component
+function TaskGroup({ groupKey, group, children, isOver }) {
+  return (
+    <div
+      className={`bg-white rounded-xl border overflow-hidden transition-colors ${
+        isOver ? 'border-primary-400 ring-2 ring-primary-200' : 'border-gray-200'
+      }`}
+    >
+      <div className={`px-6 py-4 border-b transition-colors ${
+        isOver ? 'bg-primary-50 border-primary-200' : 'bg-gray-50 border-gray-200'
+      }`}>
+        <h3 className="font-semibold text-gray-900">{group.name}</h3>
+        <p className="text-sm text-gray-500">
+          {group.tasks.filter((t) => t.status === 'COMPLETED').length} of {group.tasks.length} completed
+        </p>
+      </div>
+      <div className="min-h-[60px]">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function TodaysTasks() {
   const { currentSite } = useSite();
@@ -64,12 +267,47 @@ export default function TodaysTasks() {
   const [showCompleteModal, setShowCompleteModal] = useState(null);
   const [showSkipModal, setShowSkipModal] = useState(null);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [activeId, setActiveId] = useState(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   useEffect(() => {
     if (currentSite?.id) {
       fetchTasks();
     }
   }, [currentSite, selectedDate]);
+
+  const handleGenerateTasks = async () => {
+    if (!currentSite?.id) return;
+
+    try {
+      setGenerating(true);
+      const response = await tasksApi.generateTasks(selectedDate);
+      const count = response.data?.generated || 0;
+
+      if (count > 0) {
+        alert(`Generated ${count} task(s) for ${selectedDate}`);
+        await fetchTasks();
+      } else {
+        alert('No new tasks to generate. Tasks may already exist for this date, or no active runlists match this date.');
+      }
+    } catch (err) {
+      alert('Failed to generate tasks: ' + err.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const fetchTasks = async () => {
     if (!currentSite?.id) return;
@@ -80,7 +318,8 @@ export default function TodaysTasks() {
 
       const params = {
         siteId: currentSite.id,
-        scheduledDate: selectedDate,
+        startDate: selectedDate,
+        endDate: selectedDate,
       };
 
       const response = await tasksApi.listOccurrences(params);
@@ -146,26 +385,142 @@ export default function TodaysTasks() {
     }
   };
 
-  const filteredTasks = tasks.filter((task) => {
-    if (filter === 'all') return true;
-    if (filter === 'pending') return ['SCHEDULED', 'IN_PROGRESS', 'OVERDUE'].includes(task.status);
-    if (filter === 'completed') return ['COMPLETED', 'SKIPPED'].includes(task.status);
-    return true;
-  });
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (filter === 'all') return true;
+      if (filter === 'pending') return ['SCHEDULED', 'IN_PROGRESS', 'OVERDUE'].includes(task.status);
+      if (filter === 'completed') return ['COMPLETED', 'SKIPPED'].includes(task.status);
+      return true;
+    });
+  }, [tasks, filter]);
 
   const completedCount = tasks.filter((t) => t.status === 'COMPLETED').length;
   const totalCount = tasks.length;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   // Group tasks by runlist
-  const groupedTasks = filteredTasks.reduce((acc, task) => {
-    const key = task.runlistId || 'adhoc';
-    if (!acc[key]) {
-      acc[key] = { name: task.runlistName || 'Ad-hoc Tasks', tasks: [] };
+  const groupedTasks = useMemo(() => {
+    return filteredTasks.reduce((acc, task) => {
+      const key = task.runlistId || 'adhoc';
+      if (!acc[key]) {
+        acc[key] = { name: task.runlistName || 'Ad-hoc Tasks', tasks: [] };
+      }
+      acc[key].tasks.push(task);
+      return acc;
+    }, {});
+  }, [filteredTasks]);
+
+  // Find task by ID across all groups
+  const findTask = (id) => tasks.find((t) => t.id === id);
+
+  // Find which group a task belongs to
+  const findGroupForTask = (taskId) => {
+    const task = findTask(taskId);
+    return task ? (task.runlistId || 'adhoc') : null;
+  };
+
+  // Handle drag start
+  const handleDragStart = (event) => {
+    setActiveId(event.active.id);
+  };
+
+  // Handle drag end
+  const handleDragEnd = async (event) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (!over || active.id === over.id) return;
+
+    const activeTask = findTask(active.id);
+    const overTask = findTask(over.id);
+
+    if (!activeTask || !overTask) return;
+
+    const activeGroup = findGroupForTask(active.id);
+    const overGroup = findGroupForTask(over.id);
+
+    // Optimistic update
+    setTasks((prevTasks) => {
+      const newTasks = [...prevTasks];
+
+      // If moving within the same group, just reorder
+      if (activeGroup === overGroup) {
+        const groupTasks = newTasks.filter(t => (t.runlistId || 'adhoc') === activeGroup);
+        const otherTasks = newTasks.filter(t => (t.runlistId || 'adhoc') !== activeGroup);
+
+        const oldIndex = groupTasks.findIndex((t) => t.id === active.id);
+        const newIndex = groupTasks.findIndex((t) => t.id === over.id);
+
+        const reorderedGroupTasks = arrayMove(groupTasks, oldIndex, newIndex);
+        return [...otherTasks, ...reorderedGroupTasks];
+      }
+
+      // Moving between groups - update the task's runlistId
+      const taskIndex = newTasks.findIndex(t => t.id === active.id);
+      if (taskIndex !== -1) {
+        const updatedTask = { ...newTasks[taskIndex] };
+        if (overGroup === 'adhoc') {
+          updatedTask.runlistId = null;
+          updatedTask.runlistName = null;
+        } else {
+          updatedTask.runlistId = overGroup;
+          updatedTask.runlistName = overTask.runlistName;
+        }
+        newTasks[taskIndex] = updatedTask;
+      }
+
+      return newTasks;
+    });
+
+    // Save to backend
+    try {
+      setSavingOrder(true);
+
+      // Build the ordered tasks array with new sort orders
+      const allTasksToUpdate = [];
+      let sortOrderCounter = 0;
+
+      // Get all tasks after the optimistic update, grouped by runlist
+      const updatedGroupedTasks = {};
+      tasks.forEach(task => {
+        const key = task.id === active.id
+          ? (overGroup === 'adhoc' ? 'adhoc' : overGroup)
+          : (task.runlistId || 'adhoc');
+        if (!updatedGroupedTasks[key]) {
+          updatedGroupedTasks[key] = [];
+        }
+        updatedGroupedTasks[key].push(task);
+      });
+
+      // Reorder within the target group
+      Object.entries(updatedGroupedTasks).forEach(([groupKey, groupTasks]) => {
+        groupTasks.forEach((task, index) => {
+          allTasksToUpdate.push({
+            id: task.id,
+            sortOrder: index,
+            runlistId: task.id === active.id
+              ? (overGroup === 'adhoc' ? null : overGroup)
+              : (groupKey === 'adhoc' ? null : groupKey),
+          });
+        });
+      });
+
+      await tasksApi.reorderOccurrences(selectedDate, allTasksToUpdate);
+    } catch (err) {
+      console.error('Failed to save task order:', err);
+      // Revert on error by refetching
+      await fetchTasks();
+    } finally {
+      setSavingOrder(false);
     }
-    acc[key].tasks.push(task);
-    return acc;
-  }, {});
+  };
+
+  // Handle drag cancel
+  const handleDragCancel = () => {
+    setActiveId(null);
+  };
+
+  const activeTask = activeId ? findTask(activeId) : null;
 
   if (!currentSite?.id) {
     return (
@@ -183,13 +538,28 @@ export default function TodaysTasks() {
           <h1 className="text-2xl font-display font-bold text-gray-900">Today's Tasks</h1>
           <p className="text-gray-600">Manage your daily chores at {currentSite.name}</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 flex-wrap">
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="input py-2"
           />
+          <button
+            onClick={handleGenerateTasks}
+            disabled={generating}
+            className="btn-secondary flex items-center gap-2"
+            title="Generate tasks from active runlists for this date"
+          >
+            {generating ? (
+              <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+            )}
+            {generating ? 'Generating...' : 'Generate Tasks'}
+          </button>
           <button
             onClick={() => setShowAddEventModal(true)}
             className="btn-primary flex items-center gap-2"
@@ -236,29 +606,37 @@ export default function TodaysTasks() {
               {completedCount} of {totalCount} completed
             </p>
           </div>
-          <div className="relative w-20 h-20">
-            <svg className="w-20 h-20 transform -rotate-90">
-              <circle
-                cx="40"
-                cy="40"
-                r="36"
-                fill="none"
-                stroke="#e5e7eb"
-                strokeWidth="8"
-              />
-              <circle
-                cx="40"
-                cy="40"
-                r="36"
-                fill="none"
-                stroke="#16a34a"
-                strokeWidth="8"
-                strokeDasharray={`${progressPercent * 2.26} 226`}
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-lg font-bold text-gray-900">{progressPercent}%</span>
+          <div className="flex items-center gap-4">
+            {savingOrder && (
+              <span className="text-sm text-gray-500 flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-primary-300 border-t-primary-600 rounded-full animate-spin" />
+                Saving...
+              </span>
+            )}
+            <div className="relative w-20 h-20">
+              <svg className="w-20 h-20 transform -rotate-90">
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="36"
+                  fill="none"
+                  stroke="#e5e7eb"
+                  strokeWidth="8"
+                />
+                <circle
+                  cx="40"
+                  cy="40"
+                  r="36"
+                  fill="none"
+                  stroke="#16a34a"
+                  strokeWidth="8"
+                  strokeDasharray={`${progressPercent * 2.26} 226`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-lg font-bold text-gray-900">{progressPercent}%</span>
+              </div>
             </div>
           </div>
         </div>
@@ -284,6 +662,16 @@ export default function TodaysTasks() {
           ))}
         </div>
       </div>
+
+      {/* Drag Hint */}
+      {filteredTasks.length > 0 && (
+        <p className="text-sm text-gray-500 flex items-center gap-2">
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
+          </svg>
+          Drag tasks to reorder or move between lists
+        </p>
+      )}
 
       {/* Tasks List */}
       {loading ? (
@@ -314,142 +702,44 @@ export default function TodaysTasks() {
           </Link>
         </div>
       ) : (
-        <div className="space-y-6">
-          {Object.entries(groupedTasks).map(([key, group]) => (
-            <div key={key} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-900">{group.name}</h3>
-                <p className="text-sm text-gray-500">
-                  {group.tasks.filter((t) => t.status === 'COMPLETED').length} of {group.tasks.length} completed
-                </p>
-              </div>
-              <div className="divide-y divide-gray-100">
-                {group.tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`p-4 flex items-center gap-4 ${
-                      task.status === 'COMPLETED' ? 'bg-green-50/50' : ''
-                    } ${task.status === 'OVERDUE' ? 'bg-red-50/50' : ''}`}
-                  >
-                    {/* Status/Action */}
-                    <div className="flex-shrink-0">
-                      {task.status === 'COMPLETED' ? (
-                        <div className="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                          </svg>
-                        </div>
-                      ) : task.status === 'SKIPPED' ? (
-                        <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center">
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() =>
-                            task.status === 'IN_PROGRESS'
-                              ? setShowCompleteModal(task)
-                              : handleStartTask(task.id)
-                          }
-                          disabled={actionLoading === task.id}
-                          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
-                            task.status === 'IN_PROGRESS'
-                              ? 'border-blue-500 bg-blue-100 text-blue-600'
-                              : 'border-gray-300 hover:border-primary-500 hover:bg-primary-50'
-                          }`}
-                        >
-                          {actionLoading === task.id ? (
-                            <div className="w-4 h-4 border-2 border-gray-300 border-t-primary-500 rounded-full animate-spin" />
-                          ) : task.status === 'IN_PROGRESS' ? (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                            </svg>
-                          ) : null}
-                        </button>
-                      )}
-                    </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <div className="space-y-6">
+            {Object.entries(groupedTasks).map(([key, group]) => (
+              <TaskGroup
+                key={key}
+                groupKey={key}
+                group={group}
+                isOver={activeId && findGroupForTask(activeId) !== key}
+              >
+                <SortableContext
+                  items={group.tasks.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {group.tasks.map((task) => (
+                    <SortableTaskItem
+                      key={task.id}
+                      task={task}
+                      actionLoading={actionLoading}
+                      onStart={handleStartTask}
+                      onComplete={(t) => setShowCompleteModal(t)}
+                      onSkip={(t) => setShowSkipModal(t)}
+                    />
+                  ))}
+                </SortableContext>
+              </TaskGroup>
+            ))}
+          </div>
 
-                    {/* Task Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        {task.isEvent ? (
-                          <span className="text-lg">⭐</span>
-                        ) : (
-                          <span className="text-lg">{categoryIcons[task.category] || '📝'}</span>
-                        )}
-                        <span
-                          className={`font-medium ${
-                            task.status === 'COMPLETED' ? 'text-gray-500 line-through' : 'text-gray-900'
-                          }`}
-                        >
-                          {task.name}
-                        </span>
-                        {task.isEvent && (
-                          <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
-                            {eventTypeOptions.find(e => e.value === task.eventType)?.label || 'Event'}
-                          </span>
-                        )}
-                        {task.status === 'OVERDUE' && (
-                          <span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded">
-                            Overdue
-                          </span>
-                        )}
-                        {task.posted && (
-                          <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded flex items-center gap-1">
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                            </svg>
-                            Posted
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded ${priorityColors[task.priority]}`}>
-                          {task.priority}
-                        </span>
-                        {task.estimatedDurationMinutes && (
-                          <span>{task.estimatedDurationMinutes} min</span>
-                        )}
-                        {task.scheduledTime && <span>{task.scheduledTime}</span>}
-                        {task.isEvent && task.totalCost > 0 && (
-                          <span className="text-amber-600 font-medium">
-                            ${task.totalCost.toFixed(2)}
-                          </span>
-                        )}
-                        {task.isEvent && task.totalRevenue > 0 && (
-                          <span className="text-green-600 font-medium">
-                            +${task.totalRevenue.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    {!['COMPLETED', 'SKIPPED', 'CANCELLED'].includes(task.status) && (
-                      <div className="flex items-center gap-2">
-                        {task.status === 'IN_PROGRESS' && (
-                          <button
-                            onClick={() => setShowCompleteModal(task)}
-                            className="px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700"
-                          >
-                            Complete
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setShowSkipModal(task)}
-                          className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
-                        >
-                          Skip
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+          <DragOverlay>
+            {activeTask ? <TaskDragPreview task={activeTask} /> : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {/* Complete Task Modal */}

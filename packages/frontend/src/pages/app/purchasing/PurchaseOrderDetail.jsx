@@ -20,6 +20,7 @@ export default function PurchaseOrderDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [reprocessLoading, setReprocessLoading] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [receiveLines, setReceiveLines] = useState([]);
   const [showSendModal, setShowSendModal] = useState(false);
@@ -68,15 +69,13 @@ export default function PurchaseOrderDetail() {
   const openReceiveModal = () => {
     // Initialize receive lines from PO lines with remaining quantities
     const lines = po.lineItems.map((line, index) => {
-      const receivedQty = receipts.reduce((sum, r) => {
-        const receiptLine = r.lineItems?.find((rl) => rl.lineNumber === index + 1);
-        return sum + (receiptLine?.receivedQty || 0);
-      }, 0);
+      // Use qtyReceived from PO line (updated when receipts are posted)
+      const receivedQty = line.qtyReceived || 0;
       const remainingQty = line.qtyOrdered - receivedQty;
 
       return {
         lineNumber: index + 1,
-        inventoryItemId: line.inventoryItemId,
+        inventoryItemId: line.itemId,
         description: line.description,
         orderedQty: line.qtyOrdered,
         receivedQty: receivedQty,
@@ -113,7 +112,13 @@ export default function PurchaseOrderDetail() {
 
       // Auto-post to update inventory
       if (receiptRes.data?.receipt?.id) {
-        await purchasingApi.postReceipt(receiptRes.data.receipt.id);
+        const postRes = await purchasingApi.postReceipt(receiptRes.data.receipt.id);
+        if (postRes?.partial) {
+          setError(
+            postRes?.message ||
+              'Receipt posted but inventory update failed. Please reprocess the receipt.'
+          );
+        }
       }
 
       setShowReceiveModal(false);
@@ -122,6 +127,22 @@ export default function PurchaseOrderDetail() {
       setError(err.message);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleReprocessFailedReceipts = async () => {
+    setReprocessLoading(true);
+    setError(null);
+    try {
+      const res = await purchasingApi.reprocessFailedReceipts();
+      if (res?.data?.message) {
+        setError(res.data.message);
+      }
+      await fetchData();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReprocessLoading(false);
     }
   };
 
@@ -284,10 +305,8 @@ export default function PurchaseOrderDetail() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {po.lineItems?.map((line, index) => {
-                const receivedQty = receipts.reduce((sum, r) => {
-                  const receiptLine = r.lineItems?.find((rl) => rl.lineNumber === index + 1);
-                  return sum + (receiptLine?.receivedQty || 0);
-                }, 0);
+                // Use qtyReceived from PO line (updated when receipts are posted)
+                const receivedQty = line.qtyReceived || 0;
                 return (
                   <tr key={index}>
                     <td className="px-6 py-4 text-sm text-gray-500">{index + 1}</td>
@@ -325,8 +344,16 @@ export default function PurchaseOrderDetail() {
       {/* Receipts History */}
       {receipts.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Receiving History</h2>
+            <button
+              type="button"
+              onClick={handleReprocessFailedReceipts}
+              disabled={reprocessLoading}
+              className="btn-secondary"
+            >
+              {reprocessLoading ? 'Reprocessing...' : 'Reprocess Failed Receipts'}
+            </button>
           </div>
           <div className="divide-y divide-gray-200">
             {receipts.map((receipt) => (
@@ -347,7 +374,7 @@ export default function PurchaseOrderDetail() {
                 <div className="mt-2 text-sm text-gray-600">
                   {receipt.lineItems?.map((line, i) => (
                     <span key={i} className="mr-4">
-                      Line {line.lineNumber}: {line.receivedQty} received
+                      Line {line.lineNumber}: {line.qtyReceived} received
                     </span>
                   ))}
                 </div>

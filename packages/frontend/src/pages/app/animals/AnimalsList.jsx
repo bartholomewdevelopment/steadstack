@@ -5,12 +5,27 @@ import { animalsApi, sitesApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const speciesIcons = {
+  // Large livestock
   cattle: '🐄',
+  horse: '🐴',
+  donkey: '🫏',
+  mule: '🫏',
+  // Small livestock
   sheep: '🐑',
   goat: '🐐',
   pig: '🐷',
-  horse: '🐴',
-  poultry: '🐔',
+  llama: '🦙',
+  alpaca: '🦙',
+  // Poultry
+  chicken: '🐔',
+  turkey: '🦃',
+  duck: '🦆',
+  goose: '🦢',
+  guinea_fowl: '🐔',
+  quail: '🐦',
+  // Other
+  rabbit: '🐰',
+  bee: '🐝',
   other: '🐾',
 };
 
@@ -164,13 +179,32 @@ export default function AnimalsList() {
               className="input py-2 min-w-[140px]"
             >
               <option value="">All Species</option>
-              <option value="cattle">Cattle</option>
-              <option value="sheep">Sheep</option>
-              <option value="goat">Goat</option>
-              <option value="pig">Pig</option>
-              <option value="horse">Horse</option>
-              <option value="poultry">Poultry</option>
-              <option value="other">Other</option>
+              <optgroup label="Large Livestock">
+                <option value="cattle">Cattle</option>
+                <option value="horse">Horse</option>
+                <option value="donkey">Donkey</option>
+                <option value="mule">Mule</option>
+              </optgroup>
+              <optgroup label="Small Livestock">
+                <option value="sheep">Sheep</option>
+                <option value="goat">Goat</option>
+                <option value="pig">Pig</option>
+                <option value="llama">Llama</option>
+                <option value="alpaca">Alpaca</option>
+              </optgroup>
+              <optgroup label="Poultry">
+                <option value="chicken">Chicken</option>
+                <option value="turkey">Turkey</option>
+                <option value="duck">Duck</option>
+                <option value="goose">Goose</option>
+                <option value="guinea_fowl">Guinea Fowl</option>
+                <option value="quail">Quail</option>
+              </optgroup>
+              <optgroup label="Other">
+                <option value="rabbit">Rabbit</option>
+                <option value="bee">Bee</option>
+                <option value="other">Other</option>
+              </optgroup>
             </select>
           </div>
           <div>

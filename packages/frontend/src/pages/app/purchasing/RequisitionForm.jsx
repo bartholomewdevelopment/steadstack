@@ -66,7 +66,7 @@ export default function RequisitionForm() {
     const newLines = [...form.lineItems];
     newLines[index] = { ...newLines[index], [field]: value };
 
-    // Auto-fill description, unit, and reorder quantity when item is selected
+    // Auto-fill description, unit, vendor, and reorder quantity when item is selected
     if (field === 'itemId' && value) {
       const item = inventoryItems.find(i => i.id === value);
       if (item) {
@@ -75,12 +75,15 @@ export default function RequisitionForm() {
         if (item.defaultCostPerUnit) {
           newLines[index].estimatedUnitPrice = item.defaultCostPerUnit;
         }
-        if (item.preferredVendorId) {
-          newLines[index].preferredVendorId = item.preferredVendorId;
+        // Auto-fill preferred vendor from inventory item
+        const vendorId = item.preferredVendor || item.preferredVendorId;
+        if (vendorId) {
+          newLines[index].preferredVendorId = vendorId;
         }
-        // Pre-populate with reorder quantity if available
-        if (item.reorderQuantity) {
-          newLines[index].qty = item.reorderQuantity;
+        // Auto-fill with reorder quantity if available
+        const reorderQty = item.reorderQty || item.reorderQuantity;
+        if (reorderQty) {
+          newLines[index].qty = reorderQty;
         }
       }
     }

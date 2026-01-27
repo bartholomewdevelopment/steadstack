@@ -449,6 +449,7 @@ function getCategoryIcon(category) {
     CLEANING: '🧹',
     HARVESTING: '🌾',
     PLANTING: '🌱',
+    WEEDING: '🌿',
     IRRIGATION: '💦',
     PEST_CONTROL: '🐛',
     EQUIPMENT: '⚙️',

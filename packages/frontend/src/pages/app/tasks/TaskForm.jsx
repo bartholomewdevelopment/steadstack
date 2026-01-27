@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
-import { tasksApi, sitesApi } from '../../../services/api';
+import { tasksApi, landTractsApi, animalsApi } from '../../../services/api';
+import { HelpTooltip } from '../../../components/ui/Tooltip';
+
+// Categories that could involve livestock
+const livestockCategories = ['FEEDING', 'WATERING', 'HEALTH_CHECK', 'MEDICATION', 'BREEDING', 'OTHER'];
 
 const categoryOptions = [
   { value: 'FEEDING', label: 'Feeding', icon: '🍽️' },
@@ -13,6 +17,7 @@ const categoryOptions = [
   { value: 'CLEANING', label: 'Cleaning', icon: '🧹' },
   { value: 'HARVESTING', label: 'Harvesting', icon: '🌾' },
   { value: 'PLANTING', label: 'Planting', icon: '🌱' },
+  { value: 'WEEDING', label: 'Weeding', icon: '🌿' },
   { value: 'IRRIGATION', label: 'Irrigation', icon: '💦' },
   { value: 'PEST_CONTROL', label: 'Pest Control', icon: '🐛' },
   { value: 'EQUIPMENT', label: 'Equipment', icon: '⚙️' },
@@ -63,6 +68,7 @@ export default function TaskForm() {
     category: 'OTHER',
     priority: 'MEDIUM',
     estimatedDurationMinutes: '',
+    landTractId: '',
     instructions: '',
     requiredEquipment: [],
     siteIds: [],
@@ -74,15 +80,73 @@ export default function TaskForm() {
       dayOfMonth: null,
     },
     active: true,
+    herdGroupId: '',
+    selectedAnimalIds: [],
   });
 
   const [equipmentInput, setEquipmentInput] = useState('');
+  const [landTracts, setLandTracts] = useState([]);
+  const [animalGroups, setAnimalGroups] = useState([]);
+  const [animalsInGroup, setAnimalsInGroup] = useState([]);
+  const [loadingAnimals, setLoadingAnimals] = useState(false);
 
   useEffect(() => {
     if (isEditing) {
       fetchTemplate();
     }
+    fetchLandTracts();
+    fetchAnimalGroups();
   }, [id]);
+
+  // Fetch animals when herd/group changes
+  useEffect(() => {
+    if (form.herdGroupId) {
+      fetchAnimalsInGroup(form.herdGroupId);
+    } else {
+      setAnimalsInGroup([]);
+    }
+  }, [form.herdGroupId]);
+
+  const fetchLandTracts = async () => {
+    try {
+      const response = await landTractsApi.list({ limit: 100 });
+      const tracts = response?.data?.tracts || response?.tracts || [];
+      setLandTracts(Array.isArray(tracts) ? tracts : []);
+    } catch (err) {
+      console.error('Failed to fetch land tracts:', err);
+      setLandTracts([]);
+    }
+  };
+
+  const fetchAnimalGroups = async () => {
+    try {
+      const response = await animalsApi.listGroups({ limit: 100 });
+      const groups = response?.data?.groups || response?.groups || [];
+      setAnimalGroups(Array.isArray(groups) ? groups : []);
+    } catch (err) {
+      console.error('Failed to fetch animal groups:', err);
+      setAnimalGroups([]);
+    }
+  };
+
+  const fetchAnimalsInGroup = async (groupId) => {
+    setLoadingAnimals(true);
+    try {
+      // Include siteId in the query for proper filtering
+      const response = await animalsApi.list({
+        groupId,
+        siteId: currentSite?.id,
+        limit: 200
+      });
+      const animals = response?.data?.animals || response?.animals || [];
+      setAnimalsInGroup(Array.isArray(animals) ? animals : []);
+    } catch (err) {
+      console.error('Failed to fetch animals in group:', err);
+      setAnimalsInGroup([]);
+    } finally {
+      setLoadingAnimals(false);
+    }
+  };
 
   const fetchTemplate = async () => {
     try {
@@ -96,6 +160,7 @@ export default function TaskForm() {
         category: template.category || 'OTHER',
         priority: template.priority || 'MEDIUM',
         estimatedDurationMinutes: template.estimatedDurationMinutes || '',
+        landTractId: template.landTractId || '',
         instructions: template.instructions || '',
         requiredEquipment: template.requiredEquipment || [],
         siteIds: template.siteIds || [],
@@ -107,6 +172,8 @@ export default function TaskForm() {
           dayOfMonth: null,
         },
         active: template.active !== false,
+        herdGroupId: template.herdGroupId || '',
+        selectedAnimalIds: template.selectedAnimalIds || [],
       });
     } catch (err) {
       setError(err.message);
@@ -149,6 +216,31 @@ export default function TaskForm() {
     });
   };
 
+  const handleAnimalToggle = (animalId) => {
+    setForm((prev) => {
+      const current = prev.selectedAnimalIds || [];
+      const updated = current.includes(animalId)
+        ? current.filter((id) => id !== animalId)
+        : [...current, animalId];
+      return {
+        ...prev,
+        selectedAnimalIds: updated,
+      };
+    });
+  };
+
+  const handleSelectAllAnimals = () => {
+    const allAnimalIds = animalsInGroup.map((a) => a.id || a._id);
+    const allSelected = allAnimalIds.every((id) => form.selectedAnimalIds.includes(id));
+
+    setForm((prev) => ({
+      ...prev,
+      selectedAnimalIds: allSelected ? [] : allAnimalIds,
+    }));
+  };
+
+  const isLivestockCategory = livestockCategories.includes(form.category);
+
   const handleAddEquipment = () => {
     if (equipmentInput.trim()) {
       setForm((prev) => ({
@@ -190,6 +282,9 @@ export default function TaskForm() {
       if (!data.description) delete data.description;
       if (!data.instructions) delete data.instructions;
       if (!data.defaultAssigneeId) delete data.defaultAssigneeId;
+      if (!data.landTractId) delete data.landTractId;
+      if (!data.herdGroupId) delete data.herdGroupId;
+      if (!data.selectedAnimalIds || data.selectedAnimalIds.length === 0) delete data.selectedAnimalIds;
 
       if (isEditing) {
         await tasksApi.updateTemplate(id, data);
@@ -275,7 +370,18 @@ export default function TaskForm() {
                 <select
                   name="category"
                   value={form.category}
-                  onChange={handleChange}
+                  onChange={(e) => {
+                    handleChange(e);
+                    // Reset livestock fields when changing away from livestock category
+                    if (!livestockCategories.includes(e.target.value)) {
+                      setForm((prev) => ({
+                        ...prev,
+                        category: e.target.value,
+                        herdGroupId: '',
+                        selectedAnimalIds: [],
+                      }));
+                    }
+                  }}
                   className="input"
                 >
                   {categoryOptions.map((cat) => (
@@ -303,6 +409,101 @@ export default function TaskForm() {
               </div>
             </div>
 
+            {/* Livestock Selection - Only shown for livestock-related categories */}
+            {isLivestockCategory && (
+              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                  <span>🐄</span> Livestock Selection
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="label">Herd / Group</label>
+                    <select
+                      name="herdGroupId"
+                      value={form.herdGroupId}
+                      onChange={(e) => {
+                        setForm((prev) => ({
+                          ...prev,
+                          herdGroupId: e.target.value,
+                          selectedAnimalIds: [], // Reset animal selection when group changes
+                        }));
+                      }}
+                      className="input"
+                    >
+                      <option value="">Select a herd or group...</option>
+                      {animalGroups.map((group) => (
+                        <option key={group.id || group._id} value={group.id || group._id}>
+                          {group.name} {group.animalCount ? `(${group.animalCount} animals)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {form.herdGroupId && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="label mb-0">Select Animals</label>
+                        <button
+                          type="button"
+                          onClick={handleSelectAllAnimals}
+                          className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                        >
+                          {animalsInGroup.length > 0 &&
+                          form.selectedAnimalIds.length === animalsInGroup.length
+                            ? 'Deselect All'
+                            : 'Select All'}
+                        </button>
+                      </div>
+
+                      {loadingAnimals ? (
+                        <div className="text-sm text-gray-500 py-4 text-center">
+                          Loading animals...
+                        </div>
+                      ) : animalsInGroup.length === 0 ? (
+                        <div className="text-sm text-gray-500 py-4 text-center bg-white rounded border border-gray-200">
+                          No animals found in this group
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded border border-gray-200 max-h-48 overflow-y-auto">
+                          {animalsInGroup.map((animal) => {
+                            const animalId = animal.id || animal._id;
+                            const isSelected = form.selectedAnimalIds.includes(animalId);
+                            return (
+                              <label
+                                key={animalId}
+                                className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                                  isSelected ? 'bg-primary-50' : ''
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => handleAnimalToggle(animalId)}
+                                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                                />
+                                <span className="flex-1 text-sm text-gray-700">
+                                  {animal.name || animal.tagNumber || `Animal #${animalId.slice(-6)}`}
+                                </span>
+                                {animal.tagNumber && animal.name && (
+                                  <span className="text-xs text-gray-400">#{animal.tagNumber}</span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {form.selectedAnimalIds.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          {form.selectedAnimalIds.length} animal{form.selectedAnimalIds.length !== 1 ? 's' : ''} selected
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="label">Estimated Duration (minutes)</label>
               <input
@@ -318,11 +519,31 @@ export default function TaskForm() {
           </div>
         </div>
 
-        {/* Instructions & Equipment */}
+        {/* Location, Instructions & Equipment */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Instructions & Equipment</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Location, Instructions & Equipment</h2>
 
           <div className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <label className="label mb-0">Location (Land Tract)</label>
+                <HelpTooltip content="Optional: Select the pasture, field, or area where this task will be performed. Leave blank for off-site tasks like store runs." position="right" />
+              </div>
+              <select
+                name="landTractId"
+                value={form.landTractId}
+                onChange={handleChange}
+                className="input"
+              >
+                <option value="">No specific location (off-site or general)</option>
+                {landTracts.map((tract) => (
+                  <option key={tract.id || tract._id} value={tract.id || tract._id}>
+                    {tract.name} {tract.acres ? `(${tract.acres} acres)` : ''} {tract.landUse ? `- ${tract.landUse}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="label">Instructions</label>
               <textarea

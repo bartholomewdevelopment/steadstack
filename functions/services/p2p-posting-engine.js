@@ -4,8 +4,9 @@
  * Also handles inventory movements
  */
 
-const { db, FieldValue } = require('./firestore');
-const { P2PEventType } = require('../models/p2p-schemas');
+const { db, admin } = require("../config/firebase-admin");
+const { FieldValue } = admin.firestore;
+const { P2PEventType } = require("../models/p2p-schemas");
 
 // ============================================
 // DEFAULT ACCOUNT MAPPING
@@ -13,14 +14,14 @@ const { P2PEventType } = require('../models/p2p-schemas');
 
 // These would typically be configurable per tenant
 const DEFAULT_ACCOUNTS = {
-  ACCOUNTS_PAYABLE: 'accounts-payable',
-  CASH: 'cash',
-  FEED_INVENTORY: 'feed-inventory',
-  SUPPLIES_INVENTORY: 'supplies-inventory',
-  MEDICINE_INVENTORY: 'medicine-inventory',
-  EQUIPMENT_PARTS_INVENTORY: 'equipment-parts-inventory',
-  PURCHASE_PRICE_VARIANCE: 'purchase-price-variance',
-  SHIPPING_EXPENSE: 'shipping-expense',
+  ACCOUNTS_PAYABLE: "accounts-payable",
+  CASH: "cash",
+  FEED_INVENTORY: "feed-inventory",
+  SUPPLIES_INVENTORY: "supplies-inventory",
+  MEDICINE_INVENTORY: "medicine-inventory",
+  EQUIPMENT_PARTS_INVENTORY: "equipment-parts-inventory",
+  PURCHASE_PRICE_VARIANCE: "purchase-price-variance",
+  SHIPPING_EXPENSE: "shipping-expense",
 };
 
 // Map inventory category to GL account
@@ -59,7 +60,8 @@ const buildReceiptPostingEntries = (event, accounts) => {
   for (const line of lines) {
     // Get the inventory account for this item's category
     // In production, you'd look up the item's category from Firestore
-    const inventoryAccount = accounts.inventory || DEFAULT_ACCOUNTS.SUPPLIES_INVENTORY;
+    const inventoryAccount =
+      accounts.inventory || DEFAULT_ACCOUNTS.SUPPLIES_INVENTORY;
 
     if (!inventoryByAccount[inventoryAccount]) {
       inventoryByAccount[inventoryAccount] = 0;
@@ -108,16 +110,18 @@ const buildVariancePostingEntries = (event, accounts) => {
   if (varianceAmount > 0) {
     // Bill is higher than receipts - we owe more
     entries.push({
-      accountId: accounts.purchasePriceVariance || DEFAULT_ACCOUNTS.PURCHASE_PRICE_VARIANCE,
+      accountId:
+        accounts.purchasePriceVariance ||
+        DEFAULT_ACCOUNTS.PURCHASE_PRICE_VARIANCE,
       debit: varianceAmount,
       credit: 0,
-      memo: 'Purchase price variance - bill higher than receipt',
+      memo: "Purchase price variance - bill higher than receipt",
     });
     entries.push({
       accountId: accounts.accountsPayable || DEFAULT_ACCOUNTS.ACCOUNTS_PAYABLE,
       debit: 0,
       credit: varianceAmount,
-      memo: 'Purchase price variance - additional AP',
+      memo: "Purchase price variance - additional AP",
       vendorId,
     });
   } else if (varianceAmount < 0) {
@@ -127,14 +131,16 @@ const buildVariancePostingEntries = (event, accounts) => {
       accountId: accounts.accountsPayable || DEFAULT_ACCOUNTS.ACCOUNTS_PAYABLE,
       debit: absAmount,
       credit: 0,
-      memo: 'Purchase price variance - AP reduction',
+      memo: "Purchase price variance - AP reduction",
       vendorId,
     });
     entries.push({
-      accountId: accounts.purchasePriceVariance || DEFAULT_ACCOUNTS.PURCHASE_PRICE_VARIANCE,
+      accountId:
+        accounts.purchasePriceVariance ||
+        DEFAULT_ACCOUNTS.PURCHASE_PRICE_VARIANCE,
       debit: 0,
       credit: absAmount,
-      memo: 'Purchase price variance - bill lower than receipt',
+      memo: "Purchase price variance - bill lower than receipt",
     });
   }
 
@@ -159,7 +165,7 @@ const buildPaymentPostingEntries = (event, accounts) => {
     credit: 0,
     memo: `Payment to vendor`,
     vendorId,
-    billIds: allocations.map(a => a.billId),
+    billIds: allocations.map((a) => a.billId),
   });
 
   // Credit Cash/Bank (reduce asset)
@@ -181,44 +187,84 @@ const buildPaymentPostingEntries = (event, accounts) => {
 /**
  * Create inventory movements for a receipt
  * Increases inventory quantity and updates average cost
+ *
+ * IMPORTANT: Firestore transactions require all reads before writes.
+ * This function is structured to:
+ * 1. Validate all lines
+ * 2. Read all current balance documents
+ * 3. Then perform all writes (movements + balance updates)
  */
 const createInventoryMovements = async (tenantId, event, transaction) => {
   // siteId is at event level, lines is in payload
   const siteId = event.siteId || event.payload.siteId;
   const { lines } = event.payload;
-  const movements = [];
 
   if (!siteId) {
-    throw new Error('siteId is required for inventory movements');
+    throw new Error("siteId is required for inventory movements");
   }
 
   if (!lines || !Array.isArray(lines) || lines.length === 0) {
-    throw new Error('No lines found in event payload for inventory movements');
+    throw new Error("No lines found in event payload for inventory movements");
   }
 
-  console.log(`[P2P Posting] Processing ${lines.length} inventory movements for site ${siteId}`);
+  console.log(
+    `[P2P Posting] Processing ${lines.length} inventory movements for site ${siteId}`,
+  );
 
+  // STEP 1: Validate all lines and prepare balance refs
+  const balanceRefs = [];
   for (const line of lines) {
-    // Validate required fields
     if (!line.itemId) {
-      console.error('[P2P Posting] Line missing itemId:', JSON.stringify(line));
+      console.error("[P2P Posting] Line missing itemId:", JSON.stringify(line));
       throw new Error(`Line is missing itemId`);
     }
-    if (typeof line.qtyReceived !== 'number' || line.qtyReceived <= 0) {
-      console.error('[P2P Posting] Line has invalid qtyReceived:', line.qtyReceived);
+    if (typeof line.qtyReceived !== "number" || line.qtyReceived <= 0) {
+      console.error(
+        "[P2P Posting] Line has invalid qtyReceived:",
+        line.qtyReceived,
+      );
       throw new Error(`Line has invalid qtyReceived: ${line.qtyReceived}`);
     }
 
-    console.log(`[P2P Posting] Updating inventory for item ${line.itemId}, qty: ${line.qtyReceived}`);
-    const movementRef = db.collection('tenants').doc(tenantId)
-      .collection('inventoryMovements').doc();
+    const balanceRef = db
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("sites")
+      .doc(siteId)
+      .collection("inventory")
+      .doc(line.itemId);
+    balanceRefs.push(balanceRef);
+  }
+
+  // STEP 2: Read ALL balance documents FIRST (before any writes)
+  const balanceDocs = await Promise.all(
+    balanceRefs.map((ref) => transaction.get(ref)),
+  );
+
+  // STEP 3: Now perform all writes
+  const movements = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const balanceRef = balanceRefs[i];
+    const balanceDoc = balanceDocs[i];
+
+    console.log(
+      `[P2P Posting] Updating inventory for item ${line.itemId}, qty: ${line.qtyReceived}`,
+    );
+
+    // Create movement document
+    const movementRef = db
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("inventoryMovements")
+      .doc();
 
     const movement = {
       itemId: line.itemId,
       siteId,
       eventId: event.id,
       eventType: event.type,
-      movementType: 'RECEIPT',
+      movementType: "RECEIPT",
       qty: line.qtyReceived,
       unitCost: line.unitCost,
       totalCost: line.totalCost,
@@ -234,17 +280,12 @@ const createInventoryMovements = async (tenantId, event, transaction) => {
     transaction.set(movementRef, movement);
     movements.push({ id: movementRef.id, ...movement });
 
-    // Update inventory balance
-    const balanceRef = db.collection('tenants').doc(tenantId)
-      .collection('sites').doc(siteId)
-      .collection('inventory').doc(line.itemId);
-
-    const balanceDoc = await transaction.get(balanceRef);
-
+    // Update or create inventory balance
     if (balanceDoc.exists) {
       const currentBalance = balanceDoc.data();
       const newQty = (currentBalance.qtyOnHand || 0) + line.qtyReceived;
-      const currentValue = (currentBalance.qtyOnHand || 0) * (currentBalance.avgCostPerUnit || 0);
+      const currentValue =
+        (currentBalance.qtyOnHand || 0) * (currentBalance.avgCostPerUnit || 0);
       const newValue = currentValue + line.totalCost;
       const newAvgCost = newQty > 0 ? newValue / newQty : 0;
 
@@ -281,20 +322,24 @@ const createInventoryMovements = async (tenantId, event, transaction) => {
  * This is the main entry point for the posting engine
  */
 const processEvent = async (tenantId, eventId) => {
-  const eventRef = db.collection('tenants').doc(tenantId).collection('events').doc(eventId);
+  const eventRef = db
+    .collection("tenants")
+    .doc(tenantId)
+    .collection("events")
+    .doc(eventId);
 
   return db.runTransaction(async (transaction) => {
     // 1. Get and lock the event
     const eventDoc = await transaction.get(eventRef);
     if (!eventDoc.exists) {
-      throw new Error('Event not found');
+      throw new Error("Event not found");
     }
 
     const event = { id: eventDoc.id, ...eventDoc.data() };
 
     // Check if already processed
-    if (event.status !== 'PENDING') {
-      if (event.status === 'POSTED') {
+    if (event.status !== "PENDING") {
+      if (event.status === "POSTED") {
         // Already posted - return existing results (idempotent)
         return {
           success: true,
@@ -305,16 +350,12 @@ const processEvent = async (tenantId, eventId) => {
       throw new Error(`Cannot process event in status: ${event.status}`);
     }
 
-    // 2. Mark as processing
-    transaction.update(eventRef, {
-      status: 'PROCESSING',
-      processingStartedAt: FieldValue.serverTimestamp(),
-    });
+    // NOTE: We removed the "mark as processing" write here because Firestore
+    // transactions require ALL reads to happen before ANY writes.
+    // The transaction is atomic - it either fully succeeds or fully fails.
+    // The status check above prevents duplicate processing.
 
-    // 3. Check idempotency (would typically check MongoDB here)
-    // For MVP, we rely on Firestore transaction + status check
-
-    // 4. Build posting entries based on event type
+    // 2. Build posting entries based on event type
     let entries = [];
     let inventoryMovementIds = [];
 
@@ -325,8 +366,12 @@ const processEvent = async (tenantId, eventId) => {
       case P2PEventType.RECEIPT_POSTED:
         entries = buildReceiptPostingEntries(event, accounts);
         // Create inventory movements
-        const movements = await createInventoryMovements(tenantId, event, transaction);
-        inventoryMovementIds = movements.map(m => m.id);
+        const movements = await createInventoryMovements(
+          tenantId,
+          event,
+          transaction,
+        );
+        inventoryMovementIds = movements.map((m) => m.id);
         break;
 
       case P2PEventType.BILL_VARIANCE_POSTED:
@@ -341,12 +386,12 @@ const processEvent = async (tenantId, eventId) => {
         // Non-posting event types (REQUISITION_*, PO_*, BILL_CREATED, etc.)
         // Just mark as posted with no ledger entries
         transaction.update(eventRef, {
-          status: 'POSTED',
+          status: "POSTED",
           postingResults: {
             ledgerTransactionId: null,
             inventoryMovementIds: [],
             entriesCount: 0,
-            message: 'Non-posting event logged',
+            message: "Non-posting event logged",
           },
           postedAt: FieldValue.serverTimestamp(),
         });
@@ -358,17 +403,22 @@ const processEvent = async (tenantId, eventId) => {
         };
     }
 
-    // 5. Validate entries are balanced
+    // 3. Validate entries are balanced
     const totalDebits = entries.reduce((sum, e) => sum + (e.debit || 0), 0);
     const totalCredits = entries.reduce((sum, e) => sum + (e.credit || 0), 0);
 
     if (Math.abs(totalDebits - totalCredits) > 0.01) {
-      throw new Error(`Unbalanced transaction: debits=${totalDebits}, credits=${totalCredits}`);
+      throw new Error(
+        `Unbalanced transaction: debits=${totalDebits}, credits=${totalCredits}`,
+      );
     }
 
-    // 6. Create ledger transaction in Firestore (would be MongoDB in production)
-    const ledgerTxRef = db.collection('tenants').doc(tenantId)
-      .collection('ledgerTransactions').doc();
+    // 4. Create ledger transaction in Firestore (would be MongoDB in production)
+    const ledgerTxRef = db
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("ledgerTransactions")
+      .doc();
 
     const ledgerTransaction = {
       eventId: event.id,
@@ -378,17 +428,20 @@ const processEvent = async (tenantId, eventId) => {
       idempotencyKey: event.idempotencyKey,
       totalAmount: totalDebits,
       entriesCount: entries.length,
-      status: 'POSTED',
+      status: "POSTED",
       createdAt: FieldValue.serverTimestamp(),
     };
 
     transaction.set(ledgerTxRef, ledgerTransaction);
 
-    // 7. Create ledger entries
+    // 5. Create ledger entries
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
-      const entryRef = db.collection('tenants').doc(tenantId)
-        .collection('ledgerEntries').doc();
+      const entryRef = db
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("ledgerEntries")
+        .doc();
 
       transaction.set(entryRef, {
         transactionId: ledgerTxRef.id,
@@ -397,14 +450,14 @@ const processEvent = async (tenantId, eventId) => {
         accountId: entry.accountId,
         debit: entry.debit || 0,
         credit: entry.credit || 0,
-        memo: entry.memo || '',
+        memo: entry.memo || "",
         vendorId: entry.vendorId || null,
         billIds: entry.billIds || null,
         createdAt: FieldValue.serverTimestamp(),
       });
     }
 
-    // 8. Update event as posted
+    // 6. Update event as posted
     const postingResults = {
       ledgerTransactionId: ledgerTxRef.id,
       inventoryMovementIds,
@@ -414,7 +467,7 @@ const processEvent = async (tenantId, eventId) => {
     };
 
     transaction.update(eventRef, {
-      status: 'POSTED',
+      status: "POSTED",
       postingResults,
       postedAt: FieldValue.serverTimestamp(),
     });
@@ -433,10 +486,12 @@ const processEvent = async (tenantId, eventId) => {
  * Used for batch processing or recovery
  */
 const processPendingEvents = async (tenantId, limit = 100) => {
-  const eventsSnapshot = await db.collection('tenants').doc(tenantId)
-    .collection('events')
-    .where('status', '==', 'PENDING')
-    .orderBy('createdAt', 'asc')
+  const eventsSnapshot = await db
+    .collection("tenants")
+    .doc(tenantId)
+    .collection("events")
+    .where("status", "==", "PENDING")
+    .orderBy("createdAt", "asc")
     .limit(limit)
     .get();
 
@@ -448,10 +503,13 @@ const processPendingEvents = async (tenantId, limit = 100) => {
       results.push({ eventId: doc.id, ...result });
     } catch (error) {
       // Mark event as failed
-      await db.collection('tenants').doc(tenantId)
-        .collection('events').doc(doc.id)
+      await db
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("events")
+        .doc(doc.id)
         .update({
-          status: 'FAILED',
+          status: "FAILED",
           error: error.message,
           failedAt: FieldValue.serverTimestamp(),
         });
@@ -472,37 +530,47 @@ const processPendingEvents = async (tenantId, limit = 100) => {
  * Creates a new reversing event with opposite entries
  */
 const reverseEvent = async (tenantId, eventId, userId, reason) => {
-  const eventRef = db.collection('tenants').doc(tenantId).collection('events').doc(eventId);
+  const eventRef = db
+    .collection("tenants")
+    .doc(tenantId)
+    .collection("events")
+    .doc(eventId);
 
   return db.runTransaction(async (transaction) => {
     const eventDoc = await transaction.get(eventRef);
     if (!eventDoc.exists) {
-      throw new Error('Event not found');
+      throw new Error("Event not found");
     }
 
     const originalEvent = { id: eventDoc.id, ...eventDoc.data() };
 
-    if (originalEvent.status !== 'POSTED') {
-      throw new Error('Can only reverse POSTED events');
+    if (originalEvent.status !== "POSTED") {
+      throw new Error("Can only reverse POSTED events");
     }
 
     if (originalEvent.reversedByEventId) {
-      throw new Error('Event has already been reversed');
+      throw new Error("Event has already been reversed");
     }
 
     // Get original ledger entries
-    const entriesSnapshot = await db.collection('tenants').doc(tenantId)
-      .collection('ledgerEntries')
-      .where('eventId', '==', eventId)
+    const entriesSnapshot = await db
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("ledgerEntries")
+      .where("eventId", "==", eventId)
       .get();
 
     // Create reversal event
-    const reversalEventRef = db.collection('tenants').doc(tenantId).collection('events').doc();
+    const reversalEventRef = db
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("events")
+      .doc();
 
     const reversalEvent = {
       type: `${originalEvent.type}_REVERSAL`,
       occurredAt: FieldValue.serverTimestamp(),
-      sourceType: 'eventReversal',
+      sourceType: "eventReversal",
       sourceId: eventId,
       siteId: originalEvent.siteId,
       payload: {
@@ -510,7 +578,7 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
         originalEventType: originalEvent.type,
         reason,
       },
-      status: 'PENDING',
+      status: "PENDING",
       idempotencyKey: `reversal-${eventId}`,
       postingResults: null,
       error: null,
@@ -522,7 +590,7 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
 
     // Mark original event as reversed
     transaction.update(eventRef, {
-      status: 'REVERSED',
+      status: "REVERSED",
       reversedByEventId: reversalEventRef.id,
       reversedAt: FieldValue.serverTimestamp(),
       reversedBy: userId,
@@ -530,8 +598,11 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
     });
 
     // Create reversal ledger transaction
-    const reversalTxRef = db.collection('tenants').doc(tenantId)
-      .collection('ledgerTransactions').doc();
+    const reversalTxRef = db
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("ledgerTransactions")
+      .doc();
 
     const totalAmount = entriesSnapshot.docs.reduce((sum, doc) => {
       return sum + (doc.data().debit || 0);
@@ -545,7 +616,7 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
       idempotencyKey: `reversal-${eventId}`,
       totalAmount,
       entriesCount: entriesSnapshot.docs.length,
-      status: 'POSTED',
+      status: "POSTED",
       reversesTransactionId: originalEvent.postingResults?.ledgerTransactionId,
       createdAt: FieldValue.serverTimestamp(),
     });
@@ -553,8 +624,11 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
     // Create reversed entries (swap debits and credits)
     for (let i = 0; i < entriesSnapshot.docs.length; i++) {
       const originalEntry = entriesSnapshot.docs[i].data();
-      const reversalEntryRef = db.collection('tenants').doc(tenantId)
-        .collection('ledgerEntries').doc();
+      const reversalEntryRef = db
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("ledgerEntries")
+        .doc();
 
       transaction.set(reversalEntryRef, {
         transactionId: reversalTxRef.id,
@@ -572,23 +646,30 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
 
     // Reverse inventory movements if applicable
     if (originalEvent.postingResults?.inventoryMovementIds?.length) {
-      for (const movementId of originalEvent.postingResults.inventoryMovementIds) {
-        const movementRef = db.collection('tenants').doc(tenantId)
-          .collection('inventoryMovements').doc(movementId);
+      for (const movementId of originalEvent.postingResults
+        .inventoryMovementIds) {
+        const movementRef = db
+          .collection("tenants")
+          .doc(tenantId)
+          .collection("inventoryMovements")
+          .doc(movementId);
 
         const movementDoc = await transaction.get(movementRef);
         if (movementDoc.exists) {
           const movement = movementDoc.data();
 
           // Create reversal movement
-          const reversalMovementRef = db.collection('tenants').doc(tenantId)
-            .collection('inventoryMovements').doc();
+          const reversalMovementRef = db
+            .collection("tenants")
+            .doc(tenantId)
+            .collection("inventoryMovements")
+            .doc();
 
           transaction.set(reversalMovementRef, {
             ...movement,
             qty: -movement.qty, // Negative quantity
             totalCost: -movement.totalCost,
-            movementType: 'REVERSAL',
+            movementType: "REVERSAL",
             eventId: reversalEventRef.id,
             reversesMovementId: movementId,
             occurredAt: FieldValue.serverTimestamp(),
@@ -596,9 +677,13 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
           });
 
           // Update inventory balance
-          const balanceRef = db.collection('tenants').doc(tenantId)
-            .collection('sites').doc(movement.siteId)
-            .collection('inventory').doc(movement.itemId);
+          const balanceRef = db
+            .collection("tenants")
+            .doc(tenantId)
+            .collection("sites")
+            .doc(movement.siteId)
+            .collection("inventory")
+            .doc(movement.itemId);
 
           const balanceDoc = await transaction.get(balanceRef);
           if (balanceDoc.exists) {
@@ -620,7 +705,7 @@ const reverseEvent = async (tenantId, eventId, userId, reason) => {
 
     // Mark reversal event as posted
     transaction.update(reversalEventRef, {
-      status: 'POSTED',
+      status: "POSTED",
       postingResults: {
         ledgerTransactionId: reversalTxRef.id,
         reversedEventId: eventId,

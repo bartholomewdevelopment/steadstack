@@ -10,12 +10,19 @@ router.use(verifyToken);
 
 // Vehicle types
 const VehicleType = {
-  TRUCK: 'TRUCK',
-  TRACTOR: 'TRACTOR',
   ATV: 'ATV',
-  UTV: 'UTV',
-  TRAILER: 'TRAILER',
+  BACKHOE: 'BACKHOE',
+  CAR: 'CAR',
+  FORKLIFT: 'FORKLIFT',
+  GOLF_CART: 'GOLF_CART',
   IMPLEMENT: 'IMPLEMENT',
+  SKID_STEER: 'SKID_STEER',
+  SUV: 'SUV',
+  TRACTOR: 'TRACTOR',
+  TRAILER: 'TRAILER',
+  TRUCK: 'TRUCK',
+  UTV: 'UTV',
+  VAN: 'VAN',
   OTHER: 'OTHER',
 };
 
@@ -179,8 +186,8 @@ router.post(
           acquiredAt,
           acquisitionCost,
           notes,
-          createdBy: userData.id,
-          updatedBy: userData.id,
+          createdBy: userData.user.id,
+          updatedBy: userData.user.id,
         },
         // Vehicle data
         vehicle: {
@@ -265,7 +272,7 @@ router.patch(
           acquiredAt,
           acquisitionCost,
           notes,
-          updatedBy: userData.id,
+          updatedBy: userData.user.id,
         },
         vehicle: {
           siteId,
@@ -320,7 +327,7 @@ router.post(
 
       const updateData = {
         status,
-        updatedBy: userData.id,
+        updatedBy: userData.user.id,
       };
 
       if (status !== 'ACTIVE') {

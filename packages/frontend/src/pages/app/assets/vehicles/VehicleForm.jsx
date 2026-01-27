@@ -4,12 +4,19 @@ import { useSite } from '../../../../contexts/SiteContext';
 import { vehiclesApi, sitesApi } from '../../../../services/api';
 
 const vehicleTypes = [
-  { value: 'TRUCK', label: 'Truck' },
-  { value: 'TRACTOR', label: 'Tractor' },
   { value: 'ATV', label: 'ATV' },
-  { value: 'UTV', label: 'UTV' },
-  { value: 'TRAILER', label: 'Trailer' },
+  { value: 'BACKHOE', label: 'Backhoe' },
+  { value: 'CAR', label: 'Car' },
+  { value: 'FORKLIFT', label: 'Forklift' },
+  { value: 'GOLF_CART', label: 'Golf Cart' },
   { value: 'IMPLEMENT', label: 'Implement' },
+  { value: 'SKID_STEER', label: 'Skid Steer' },
+  { value: 'SUV', label: 'SUV' },
+  { value: 'TRACTOR', label: 'Tractor' },
+  { value: 'TRAILER', label: 'Trailer' },
+  { value: 'TRUCK', label: 'Truck' },
+  { value: 'UTV', label: 'UTV' },
+  { value: 'VAN', label: 'Van' },
   { value: 'OTHER', label: 'Other' },
 ];
 

@@ -214,7 +214,14 @@ export default function RequisitionDetail() {
           )}
           {requisition.status === 'APPROVED' && (
             <button
-              onClick={() => setShowConvertModal(true)}
+              onClick={() => {
+                // Pre-select vendor from line items if available
+                const lineWithVendor = requisition.lineItems?.find(line => line.preferredVendorId);
+                if (lineWithVendor?.preferredVendorId) {
+                  setSelectedVendor(lineWithVendor.preferredVendorId);
+                }
+                setShowConvertModal(true);
+              }}
               disabled={actionLoading}
               className="btn-primary"
             >

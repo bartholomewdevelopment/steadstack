@@ -4,6 +4,7 @@ const { verifyToken } = require('../middleware/auth');
 const firestoreService = require('../services/firestore');
 const accountingService = require('../services/accounting');
 const { v4: uuidv4 } = require('uuid');
+const { Site } = require('../models');
 
 const router = express.Router();
 
@@ -35,7 +36,11 @@ router.get('/items', async (req, res) => {
 
     // Always include aggregated quantities (unless explicitly disabled)
     if (includeSiteQty !== 'false') {
-      const sites = await firestoreService.getSites(tenantId);
+      // Get sites from MongoDB (req.user.tenantId is MongoDB ObjectId)
+      const mongoTenantId = req.user?.tenantId?._id || req.user?.tenantId;
+      const sites = mongoTenantId
+        ? await Site.find({ tenantId: mongoTenantId, status: { $ne: 'archived' } }).lean()
+        : [];
 
       for (const item of items) {
         let totalQtyOnHand = 0;
@@ -55,18 +60,19 @@ router.get('/items', async (req, res) => {
             });
           }
         } else {
-          // Aggregate across all sites
+          // Aggregate across all sites (sites are from MongoDB, balances are in Firestore)
           for (const site of sites) {
+            const mongoSiteId = site._id.toString();
             const balance = await firestoreService.getSiteInventoryBalance(
               tenantId,
-              site.id,
+              mongoSiteId,
               item.id
             );
             if (balance.qtyOnHand > 0) {
               totalQtyOnHand += balance.qtyOnHand;
               totalValue += balance.qtyOnHand * (balance.avgCostPerUnit || 0);
               siteBalances.push({
-                siteId: site.id,
+                siteId: mongoSiteId,
                 siteName: site.name,
                 qtyOnHand: balance.qtyOnHand,
                 avgCostPerUnit: balance.avgCostPerUnit,
@@ -131,9 +137,18 @@ router.get(
         return res.status(404).json({ success: false, message: 'Item not found' });
       }
 
+      // Get site inventory balances for this item
+      // Pass MongoDB tenantId for site lookups (req.user.tenantId is MongoDB ObjectId)
+      const mongoTenantId = req.user?.tenantId?._id || req.user?.tenantId;
+      const siteInventory = await firestoreService.getItemSiteBalances(
+        userData.tenantId,
+        req.params.id,
+        mongoTenantId
+      );
+
       res.json({
         success: true,
-        data: { item },
+        data: { item, siteInventory },
       });
     } catch (error) {
       console.error('Error fetching inventory item:', error);

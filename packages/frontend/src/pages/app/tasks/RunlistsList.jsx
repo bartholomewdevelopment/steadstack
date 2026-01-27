@@ -17,12 +17,45 @@ export default function RunlistsList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
+  const [statusCounts, setStatusCounts] = useState({
+    ACTIVE: 0,
+    PAUSED: 0,
+    DRAFT: 0,
+    ARCHIVED: 0,
+  });
 
   useEffect(() => {
     if (currentSite?.id) {
       fetchRunlists();
+      fetchStatusCounts();
     }
   }, [currentSite, statusFilter]);
+
+  const fetchStatusCounts = async () => {
+    if (!currentSite?.id) return;
+
+    try {
+      // Fetch counts for all statuses in parallel
+      const statuses = ['ACTIVE', 'PAUSED', 'DRAFT', 'ARCHIVED'];
+      const countPromises = statuses.map(async (status) => {
+        const response = await tasksApi.listRunlists({
+          siteId: currentSite.id,
+          status,
+        });
+        return { status, count: response.data?.runlists?.length || 0 };
+      });
+
+      const results = await Promise.all(countPromises);
+      const counts = results.reduce((acc, { status, count }) => {
+        acc[status] = count;
+        return acc;
+      }, {});
+
+      setStatusCounts(counts);
+    } catch (err) {
+      console.error('Failed to fetch status counts:', err);
+    }
+  };
 
   const fetchRunlists = async () => {
     if (!currentSite?.id) return;
@@ -51,6 +84,7 @@ export default function RunlistsList() {
     try {
       await tasksApi.activateRunlist(id);
       await fetchRunlists();
+      await fetchStatusCounts();
     } catch (err) {
       alert('Failed to activate: ' + err.message);
     }
@@ -60,6 +94,7 @@ export default function RunlistsList() {
     try {
       await tasksApi.pauseRunlist(id);
       await fetchRunlists();
+      await fetchStatusCounts();
     } catch (err) {
       alert('Failed to pause: ' + err.message);
     }
@@ -70,6 +105,7 @@ export default function RunlistsList() {
     try {
       await tasksApi.archiveRunlist(id);
       await fetchRunlists();
+      await fetchStatusCounts();
     } catch (err) {
       alert('Failed to archive: ' + err.message);
     }
@@ -136,13 +172,22 @@ export default function RunlistsList() {
           <button
             key={status}
             onClick={() => setStatusFilter(status === statusFilter ? '' : status)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors inline-flex items-center gap-2 ${
               status === statusFilter
                 ? 'bg-primary-100 text-primary-700'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
             {status.charAt(0) + status.slice(1).toLowerCase()}
+            <span
+              className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-semibold rounded-full ${
+                status === statusFilter
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-300 text-gray-700'
+              }`}
+            >
+              {statusCounts[status] || 0}
+            </span>
           </button>
         ))}
       </div>

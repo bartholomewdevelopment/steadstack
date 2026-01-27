@@ -4,18 +4,57 @@
 
 Track operations, inventory, and accounting in one unified platform. Every farm activity automatically updates your books.
 
+**Live Site:** https://stead-stack.web.app
+
+## Features
+
+### Assets Management
+- **Livestock** - Track animals with tags, species, breeds, birth dates, and status
+- **Vehicles** - Manage trucks, tractors, ATVs with maintenance tracking
+- **Land** - Sites, tracts, pastures with mapping integration
+- **Equipment** - Buildings, infrastructure, tools, and other assets
+
+### Operations
+- **Tasks** - Daily chores, scheduled work, and reusable task templates
+- **Run Lists** - Checklists that group tasks for efficient workflows
+- **Events** - Log farm activities that can post to accounting
+
+### Inventory
+- Track feed, supplies, medicine, and consumables
+- Low stock alerts with reorder points
+- Inventory movements and adjustments
+
+### Purchasing (Procure-to-Pay)
+- **Requisitions** - Request items needed for the farm
+- **Purchase Orders** - Formalize orders with vendors
+- **Vendor Bills** - Track what you owe
+- **Payments** - Record payments to vendors
+- **A/P Aging** - Monitor outstanding payables
+
+### Accounting
+- **Chart of Accounts** - Full double-entry accounting with CSV import
+- **Accounts Receivable** - Track customer invoices and payments
+- **Accounts Payable** - Manage vendor bills and payments
+- **Banking** - Checks, deposits, receipts, and reconciliation
+- **Analysis & Inquiry** - Drill into account activity
+
+### Reports
+- Financial statements
+- Analytics and performance metrics
+- Custom report generation
+
 ## Project Structure
 
 ```
 steadstack/
 ├── packages/
-│   ├── backend/          # Express.js API server
+│   ├── backend/          # Express.js API server (local dev)
 │   │   ├── src/
 │   │   │   ├── config/   # Configuration
 │   │   │   ├── models/   # Mongoose schemas
 │   │   │   ├── routes/   # API endpoints
-│   │   │   ├── middleware/
-│   │   │   └── scripts/  # Seed data, migrations
+│   │   │   ├── services/ # Business logic
+│   │   │   └── middleware/
 │   │   └── package.json
 │   │
 │   └── frontend/         # React + Vite application
@@ -23,13 +62,17 @@ steadstack/
 │       │   ├── components/
 │       │   ├── pages/
 │       │   ├── layouts/
-│       │   ├── hooks/
+│       │   ├── contexts/
+│       │   ├── services/
 │       │   └── utils/
 │       └── package.json
 │
+├── functions/            # Firebase Cloud Functions (production API)
 ├── .env.example          # Environment template
+├── firebase.json         # Firebase configuration
 ├── package.json          # Root monorepo config
-└── README.md
+├── README.md
+└── INSTRUCTIONS.md       # User guide for first-time users
 ```
 
 ## Quick Start
@@ -37,8 +80,9 @@ steadstack/
 ### Prerequisites
 
 - Node.js 18+
-- MongoDB (local or Atlas)
 - npm 9+
+- Firebase CLI (`npm install -g firebase-tools`)
+- MongoDB (local or Atlas) for local development
 
 ### Installation
 
@@ -52,10 +96,7 @@ npm install
 
 # Copy environment file
 cp .env.example packages/backend/.env
-# Edit packages/backend/.env with your MongoDB URI
-
-# Seed the database (optional)
-npm run seed
+# Edit with your configuration
 
 # Start development servers
 npm run dev
@@ -69,6 +110,19 @@ npm run dev:backend
 
 # Frontend only (http://localhost:5173)
 npm run dev:frontend
+
+# Firebase emulators
+firebase emulators:start
+```
+
+### Deployment
+
+```bash
+# Build frontend
+npm run build --workspace=packages/frontend
+
+# Deploy to Firebase
+firebase deploy
 ```
 
 ## Environment Variables
@@ -79,7 +133,7 @@ npm run dev:frontend
 |----------|-------------|---------|
 | `PORT` | API server port | `4000` |
 | `NODE_ENV` | Environment mode | `development` |
-| `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/steadstack` |
+| `MONGODB_URI` | MongoDB connection string | Required |
 | `CORS_ORIGIN` | Frontend URL for CORS | `http://localhost:5173` |
 
 ### Frontend (`packages/frontend/.env`)
@@ -92,32 +146,10 @@ npm run dev:frontend
 | `VITE_FIREBASE_STORAGE_BUCKET` | Firebase storage bucket |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase messaging sender ID |
 | `VITE_FIREBASE_APP_ID` | Firebase app ID |
-| `VITE_FIREBASE_MEASUREMENT_ID` | Firebase analytics measurement ID |
 
-## API Endpoints
+## Application Routes
 
-### Segment 1: Marketing Site
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/health` | Health check with DB status |
-| `POST` | `/api/contact` | Submit contact inquiry |
-| `GET` | `/api/pricing` | Get pricing tiers |
-
-### Example: Submit Contact Form
-
-```bash
-curl -X POST http://localhost:4000/api/contact \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "John Doe",
-    "email": "john@example.com",
-    "message": "Interested in a demo"
-  }'
-```
-
-## Frontend Routes
-
+### Marketing Site
 | Route | Description |
 |-------|-------------|
 | `/` | Homepage |
@@ -126,76 +158,66 @@ curl -X POST http://localhost:4000/api/contact \
 | `/about` | About page |
 | `/contact` | Contact form |
 
-## Development
+### Authentication
+| Route | Description |
+|-------|-------------|
+| `/login` | User login |
+| `/signup` | New account registration |
+| `/forgot-password` | Password reset |
 
-### Project Commands
+### Customer Portal (`/app`)
+| Route | Description |
+|-------|-------------|
+| `/app` | Dashboard home |
+| `/app/tasks` | Today's tasks |
+| `/app/tasks/templates` | Task templates |
+| `/app/tasks/lists` | Run lists (checklists) |
+| `/app/assets` | Assets overview |
+| `/app/assets/animals` | Livestock management |
+| `/app/assets/vehicles` | Vehicle management |
+| `/app/assets/land` | Land and sites |
+| `/app/inventory` | Inventory tracking |
+| `/app/purchasing` | Requisitions and P2P |
+| `/app/accounting` | Chart of accounts |
+| `/app/accounting/ar` | Accounts receivable |
+| `/app/accounting/ap` | Accounts payable |
+| `/app/reports` | Reports and analytics |
+| `/app/settings` | User and farm settings |
+
+### Admin Portal (`/admin`)
+| Route | Description |
+|-------|-------------|
+| `/admin` | Admin dashboard |
+| `/admin/tenants` | Tenant management |
+| `/admin/users` | User management |
+| `/admin/inquiries` | Contact inquiries |
+
+## Development Commands
 
 ```bash
 npm run dev          # Start all services
 npm run dev:backend  # Start backend only
 npm run dev:frontend # Start frontend only
 npm run build        # Build all packages
-npm run seed         # Seed database with demo data
 npm run lint         # Lint all packages
 ```
 
-### Code Style
-
-- ES6+ JavaScript
-- Functional components with hooks (React)
-- Mongoose for MongoDB schemas
-- Express Router for API routes
-- Tailwind CSS for styling
-
-## Segment Roadmap
-
-### Segment 1: Marketing Site (Current)
-- [x] Project structure
-- [x] Landing page
-- [x] Pricing page
-- [x] Features page
-- [x] About page
-- [x] Contact form (with API)
-- [x] Responsive design
-
-### Segment 2: Authentication (Complete)
-- [x] Firebase integration
-- [x] Auth context with hooks
-- [x] Login page UI
-- [x] Signup page UI
-- [x] Password reset flow UI
-- [x] Protected routes
-- [x] User/Tenant sync to MongoDB
-- [x] RBAC middleware foundation
-
-### Segment 3: Customer Portal Shell (Complete)
-- [x] Dashboard layout with sidebar
-- [x] Site model and API
-- [x] Site selector/switcher
-- [x] Navigation structure
-- [x] Settings page
-- [x] Placeholder module pages
-
-### Segment 4: Admin Portal Shell
-- [ ] Admin dashboard
-- [ ] Tenant management
-- [ ] User management
-- [ ] Contact inquiry management
-
-### Future Segments
-- Events module
-- Inventory module
-- Animals module
-- Accounting module
-- Reporting module
-
 ## Architecture Principles
 
-1. **Multi-tenant**: Every record has `tenantId`
-2. **Multi-site**: Most records have `siteId` (nullable for global)
-3. **Event-driven**: Operational events are source of truth
-4. **Audit trail**: Every ledger entry links to source event
-5. **Double-entry accounting**: Balanced debits/credits
+1. **Multi-tenant** - Every record has `tenantId` for data isolation
+2. **Multi-site** - Records can be scoped to specific sites/locations
+3. **Event-driven** - Operational events are the source of truth
+4. **Audit trail** - Every ledger entry links to source event
+5. **Double-entry accounting** - Balanced debits and credits
+
+## Tech Stack
+
+- **Frontend:** React 18, Vite, Tailwind CSS, React Router
+- **Backend:** Node.js, Express.js, Firebase Cloud Functions
+- **Database:** MongoDB (Firestore for some features)
+- **Auth:** Firebase Authentication
+- **Hosting:** Firebase Hosting
+- **Maps:** Leaflet with OpenStreetMap
 
 ## License
 
