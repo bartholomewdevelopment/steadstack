@@ -15,6 +15,7 @@ const assetsRoutes = require('./assets');
 const vehiclesRoutes = require('./vehicles');
 const landTractsRoutes = require('./landTracts');
 const purchasingRoutes = require('./purchasing');
+const contactsRoutes = require('./contacts');
 
 const router = express.Router();
 
@@ -34,5 +35,6 @@ router.use('/assets', assetsRoutes);
 router.use('/vehicles', vehiclesRoutes);
 router.use('/land-tracts', landTractsRoutes);
 router.use('/purchasing', purchasingRoutes);
+router.use('/contacts', contactsRoutes);
 
 module.exports = router;

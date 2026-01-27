@@ -94,6 +94,13 @@ const RequisitionSource = {
   TASK: 'TASK',
 };
 
+const POSendMethod = {
+  EMAIL: 'EMAIL',
+  PHONE: 'PHONE',
+  WALKIN: 'WALKIN',
+  ONLINE: 'ONLINE',
+};
+
 // ============================================
 // DOCUMENT SCHEMAS (for reference/validation)
 // ============================================
@@ -200,6 +207,12 @@ const purchaseOrderSchema = {
   internalNotes: 'string|null',
   sentAt: 'timestamp|null',
   sentByUserId: 'string|null',
+  sendMethod: 'POSendMethod|null',
+  sentVia: {
+    method: 'POSendMethod|null',
+    emailSentTo: 'string|null',
+    notes: 'string|null',
+  },
   createdAt: 'timestamp',
   createdBy: 'string',
   updatedAt: 'timestamp',
@@ -411,6 +424,7 @@ module.exports = {
   PaymentMethod,
   P2PEventType,
   RequisitionSource,
+  POSendMethod,
 
   // Transitions
   RequisitionTransitions,

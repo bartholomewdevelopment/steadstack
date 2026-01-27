@@ -208,6 +208,8 @@ export const tasksApi = {
   cancelOccurrence: (id, reason) => api.post(`/tasks/occurrences/${id}/cancel`, { reason }),
   reassignOccurrence: (id, assigneeId) =>
     api.post(`/tasks/occurrences/${id}/reassign`, { assigneeId }),
+  reorderOccurrences: (scheduledDate, orderedTasks) =>
+    api.post('/tasks/occurrences/reorder', { scheduledDate, orderedTasks }),
 
   // Task generation
   generateTasks: (targetDate) => api.post('/tasks/generate', { targetDate }),
@@ -325,7 +327,7 @@ export const purchasingApi = {
   getPurchaseOrders: (params) => api.get('/purchasing/purchase-orders', params),
   getPurchaseOrder: (id) => api.get(`/purchasing/purchase-orders/${id}`),
   createPurchaseOrder: (data) => api.post('/purchasing/purchase-orders', data),
-  sendPurchaseOrder: (id) => api.post(`/purchasing/purchase-orders/${id}/send`),
+  sendPurchaseOrder: (id, method, notes) => api.post(`/purchasing/purchase-orders/${id}/send`, { method, notes }),
 
   // Receipts (Goods Receipts)
   getReceipts: (params) => api.get('/purchasing/receipts', params),
@@ -352,6 +354,15 @@ export const purchasingApi = {
 
   // Auto-reorder
   checkReorder: (siteId) => api.post('/purchasing/check-reorder', { siteId }),
+};
+
+// Contacts API
+export const contactsApi = {
+  list: (params) => api.get('/contacts', params),
+  get: (id) => api.get(`/contacts/${id}`),
+  create: (data) => api.post('/contacts', data),
+  update: (id, data) => api.patch(`/contacts/${id}`, data),
+  delete: (id) => api.delete(`/contacts/${id}`),
 };
 
 // Assets API (Base Registry)

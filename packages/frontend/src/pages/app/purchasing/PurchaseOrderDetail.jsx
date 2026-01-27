@@ -22,6 +22,9 @@ export default function PurchaseOrderDetail() {
   const [actionLoading, setActionLoading] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [receiveLines, setReceiveLines] = useState([]);
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendMethod, setSendMethod] = useState('');
+  const [sendNotes, setSendNotes] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -44,9 +47,16 @@ export default function PurchaseOrderDetail() {
   };
 
   const handleSend = async () => {
+    if (!sendMethod) {
+      setError('Please select how you are sending this PO');
+      return;
+    }
     setActionLoading(true);
     try {
-      await purchasingApi.sendPurchaseOrder(id);
+      await purchasingApi.sendPurchaseOrder(id, sendMethod, sendNotes || null);
+      setShowSendModal(false);
+      setSendMethod('');
+      setSendNotes('');
       await fetchData();
     } catch (err) {
       setError(err.message);
@@ -198,11 +208,11 @@ export default function PurchaseOrderDetail() {
         <div className="flex gap-2">
           {po.status === 'DRAFT' && (
             <button
-              onClick={handleSend}
+              onClick={() => setShowSendModal(true)}
               disabled={actionLoading}
               className="btn-primary"
             >
-              {actionLoading ? 'Sending...' : 'Send to Vendor'}
+              Send to Vendor
             </button>
           )}
           {canReceive && (
@@ -241,6 +251,17 @@ export default function PurchaseOrderDetail() {
           <p className="text-sm text-gray-500">Total</p>
           <p className="text-lg font-bold text-gray-900">{formatCurrency(calculateTotal())}</p>
         </div>
+        {po.sendMethod && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-sm text-gray-500">Sent Via</p>
+            <p className="text-lg font-medium text-gray-900">
+              {po.sendMethod === 'EMAIL' ? `Email${po.sentVia?.emailSentTo ? ` (${po.sentVia.emailSentTo})` : ''}` :
+               po.sendMethod === 'PHONE' ? 'Phone Call' :
+               po.sendMethod === 'WALKIN' ? 'Walk-in / In-store' : 'Online Order'}
+            </p>
+            {po.sentVia?.notes && <p className="text-sm text-gray-500 mt-1">{po.sentVia.notes}</p>}
+          </div>
+        )}
       </div>
 
       {/* Line Items */}
@@ -411,6 +432,76 @@ export default function PurchaseOrderDetail() {
                 className="flex-1 btn-primary"
               >
                 {actionLoading ? 'Receiving...' : 'Confirm Receipt'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Method Modal */}
+      {showSendModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Send to Vendor</h3>
+            <p className="text-gray-600 mb-4">How are you sending this purchase order?</p>
+
+            <div className="space-y-3 mb-4">
+              {[
+                { value: 'EMAIL', label: 'Email', desc: 'Send via email (requires vendor email)' },
+                { value: 'PHONE', label: 'Phone Call', desc: 'Called or will call the vendor' },
+                { value: 'WALKIN', label: 'Walk-in / In-store', desc: 'Purchased in person at vendor location' },
+                { value: 'ONLINE', label: 'Online Order', desc: 'Placed order on vendor website' },
+              ].map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 ${
+                    sendMethod === opt.value ? 'border-red-500 bg-red-50' : 'border-gray-200'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="sendMethod"
+                    value={opt.value}
+                    checked={sendMethod === opt.value}
+                    onChange={(e) => setSendMethod(e.target.value)}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="font-medium text-gray-900">{opt.label}</p>
+                    <p className="text-sm text-gray-500">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <input
+                type="text"
+                value={sendNotes}
+                onChange={(e) => setSendNotes(e.target.value)}
+                className="input"
+                placeholder="e.g., Order confirmation #12345"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowSendModal(false);
+                  setSendMethod('');
+                  setSendNotes('');
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={actionLoading || !sendMethod}
+                className="flex-1 btn-primary"
+              >
+                {actionLoading ? 'Sending...' : 'Mark as Sent'}
               </button>
             </div>
           </div>

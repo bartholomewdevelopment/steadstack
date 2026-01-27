@@ -6,6 +6,8 @@
 const { db, admin } = require('../config/firebase-admin');
 const { FieldValue } = admin.firestore;
 const accountingService = require('./accounting');
+const Contact = require('../models/Contact');
+const emailService = require('./email-service');
 const {
   RequisitionStatus,
   PurchaseOrderStatus,
@@ -97,11 +99,24 @@ const getVendors = async (tenantId, options = {}) => {
 };
 
 const getVendor = async (tenantId, vendorId) => {
-  const doc = await db.collection('tenants').doc(tenantId).collection('vendors').doc(vendorId).get();
+  // Look up vendor from MongoDB Contacts collection
+  const contact = await Contact.findOne({
+    _id: vendorId,
+    tenantId,
+    type: 'vendor',
+    isActive: true,
+  });
 
-  if (!doc.exists) return null;
+  if (!contact) return null;
 
-  return { id: doc.id, ...doc.data() };
+  return {
+    id: contact._id.toString(),
+    name: contact.name,
+    email: contact.email,
+    phone: contact.phone,
+    paymentTerms: contact.vendorFields?.paymentTerms || 'NET_30',
+    taxId: contact.vendorFields?.taxId,
+  };
 };
 
 // ============================================
@@ -376,24 +391,66 @@ const convertRequisitionToPO = async (tenantId, reqId, vendorId, createdBy) => {
   }, createdBy);
 };
 
-const sendPurchaseOrder = async (tenantId, poId, userId) => {
+const sendPurchaseOrder = async (tenantId, poId, userId, sendMethod = 'PHONE', sendNotes = null) => {
   const poRef = db.collection('tenants').doc(tenantId).collection('purchaseOrders').doc(poId);
 
-  return db.runTransaction(async (transaction) => {
-    const poDoc = await transaction.get(poRef);
-    if (!poDoc.exists) throw new Error('Purchase order not found');
+  // First, get the PO to check vendor email if needed
+  const poDoc = await poRef.get();
+  if (!poDoc.exists) throw new Error('Purchase order not found');
 
-    const po = poDoc.data();
-    validateTransition(PurchaseOrderTransitions, po.status, PurchaseOrderStatus.SENT);
+  const po = { id: poId, ...poDoc.data() };
+
+  // Get vendor info (outside transaction since Contact is MongoDB)
+  const vendor = await getVendor(tenantId, po.vendorId);
+  if (!vendor) {
+    throw new Error('Vendor not found');
+  }
+
+  let emailSentTo = null;
+  let emailId = null;
+
+  if (sendMethod === 'EMAIL') {
+    if (!vendor.email) {
+      throw new Error('Vendor does not have an email address configured');
+    }
+    emailSentTo = vendor.email;
+
+    // Get tenant info for the email
+    const tenantDoc = await db.collection('tenants').doc(tenantId).get();
+    const tenant = tenantDoc.exists ? tenantDoc.data() : null;
+
+    // Send the actual email via Firebase Email Extension
+    try {
+      emailId = await emailService.sendPurchaseOrderEmail(po, vendor, tenant);
+      console.log(`PO email queued with ID: ${emailId}`);
+    } catch (emailError) {
+      console.error('Failed to queue PO email:', emailError);
+      throw new Error(`Failed to send email: ${emailError.message}`);
+    }
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const poDocInTx = await transaction.get(poRef);
+    if (!poDocInTx.exists) throw new Error('Purchase order not found');
+
+    const poInTx = poDocInTx.data();
+    validateTransition(PurchaseOrderTransitions, poInTx.status, PurchaseOrderStatus.SENT);
 
     transaction.update(poRef, {
       status: PurchaseOrderStatus.SENT,
       sentAt: FieldValue.serverTimestamp(),
       sentByUserId: userId,
+      sendMethod: sendMethod,
+      sentVia: {
+        method: sendMethod,
+        emailSentTo: emailSentTo,
+        emailId: emailId,
+        notes: sendNotes,
+      },
       updatedAt: FieldValue.serverTimestamp(),
     });
 
-    return { id: poId, status: PurchaseOrderStatus.SENT };
+    return { id: poId, status: PurchaseOrderStatus.SENT, sendMethod, emailSentTo };
   });
 };
 

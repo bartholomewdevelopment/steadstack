@@ -17,6 +17,7 @@ const vehiclesRoutes = require('./vehicles');
 const landTractsRoutes = require('./landTracts');
 const webhooksRoutes = require('./webhooks');
 const billingRoutes = require('./billing');
+const contactsRoutes = require('./contacts');
 
 const router = express.Router();
 
@@ -38,5 +39,6 @@ router.use('/vehicles', vehiclesRoutes);
 router.use('/land-tracts', landTractsRoutes);
 router.use('/webhooks', webhooksRoutes);
 router.use('/billing', billingRoutes);
+router.use('/contacts', contactsRoutes);
 
 module.exports = router;

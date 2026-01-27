@@ -355,12 +355,27 @@ router.post(
 
 /**
  * POST /api/purchasing/purchase-orders/:id/send
- * Mark PO as sent
+ * Mark PO as sent with specified method
+ * Body: { method: 'EMAIL'|'PHONE'|'WALKIN'|'ONLINE', notes?: string }
  */
 router.post('/purchase-orders/:id/send', async (req, res) => {
   try {
     const { tenantId } = await getUserContext(req);
-    const result = await p2pService.sendPurchaseOrder(tenantId, req.params.id, req.firebaseUser.uid);
+    const { method = 'PHONE', notes } = req.body;
+
+    // Validate method
+    const validMethods = ['EMAIL', 'PHONE', 'WALKIN', 'ONLINE'];
+    if (!validMethods.includes(method)) {
+      return res.status(400).json({ success: false, message: 'Invalid send method' });
+    }
+
+    const result = await p2pService.sendPurchaseOrder(
+      tenantId,
+      req.params.id,
+      req.firebaseUser.uid,
+      method,
+      notes
+    );
 
     res.json({ success: true, data: result });
   } catch (error) {

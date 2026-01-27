@@ -1,4 +1,14 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
+
+// Redirect components for legacy animal routes
+function AnimalDetailRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/app/assets/animals/${id}`} replace />;
+}
+function AnimalEditRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/app/assets/animals/${id}/edit`} replace />;
+}
 import MarketingLayout from './layouts/MarketingLayout';
 import DashboardLayout from './layouts/DashboardLayout';
 import AdminLayout from './layouts/AdminLayout';
@@ -48,8 +58,10 @@ import {
   VendorBillDetail,
   PaymentForm,
   APAging,
-  VendorsList,
 } from './pages/app/purchasing';
+import ContactsList from './pages/app/contacts/ContactsList';
+import ContactForm from './pages/app/contacts/ContactForm';
+import ContactDetail from './pages/app/contacts/ContactDetail';
 import {
   AdminDashboard,
   TenantsList,
@@ -140,8 +152,8 @@ function App() {
         {/* Legacy Animals Routes - Redirect to Assets */}
         <Route path="animals" element={<Navigate to="/app/assets/animals" replace />} />
         <Route path="animals/new" element={<Navigate to="/app/assets/animals/new" replace />} />
-        <Route path="animals/:id" element={<Navigate to="/app/assets/animals/:id" replace />} />
-        <Route path="animals/:id/edit" element={<Navigate to="/app/assets/animals/:id/edit" replace />} />
+        <Route path="animals/:id" element={<AnimalDetailRedirect />} />
+        <Route path="animals/:id/edit" element={<AnimalEditRedirect />} />
         {/* Inventory Module */}
         <Route path="inventory" element={<InventoryList />} />
         <Route path="inventory/new" element={<InventoryForm />} />
@@ -182,7 +194,12 @@ function App() {
         <Route path="purchasing/bills/:id" element={<VendorBillDetail />} />
         <Route path="purchasing/payments/new" element={<PaymentForm />} />
         <Route path="purchasing/ap-aging" element={<APAging />} />
-        <Route path="purchasing/vendors" element={<VendorsList />} />
+        <Route path="purchasing/vendors" element={<Navigate to="/app/contacts?type=vendor" replace />} />
+        {/* Contacts Module */}
+        <Route path="contacts" element={<ContactsList />} />
+        <Route path="contacts/new" element={<ContactForm />} />
+        <Route path="contacts/:id" element={<ContactDetail />} />
+        <Route path="contacts/:id/edit" element={<ContactForm />} />
         {/* Reports Module */}
         <Route path="reports" element={<Reports />} />
         <Route path="settings" element={<Settings />} />

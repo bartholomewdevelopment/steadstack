@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { purchasingApi } from '../../../services/api';
+import { purchasingApi, contactsApi } from '../../../services/api';
 
 const statusColors = {
   DRAFT: 'bg-gray-100 text-gray-700',
@@ -32,10 +32,12 @@ export default function RequisitionDetail() {
       setLoading(true);
       const [reqRes, vendorsRes] = await Promise.all([
         purchasingApi.getRequisition(id),
-        purchasingApi.getVendors(),
+        contactsApi.list({ type: 'vendor', activeOnly: 'true' }),
       ]);
       setRequisition(reqRes.data?.requisition);
-      setVendors(vendorsRes.data?.vendors || []);
+      // Map contacts to vendor format
+      const vendorContacts = vendorsRes.data?.contacts || [];
+      setVendors(vendorContacts.map(c => ({ id: c.id, name: c.name, email: c.email })));
     } catch (err) {
       setError(err.message);
     } finally {

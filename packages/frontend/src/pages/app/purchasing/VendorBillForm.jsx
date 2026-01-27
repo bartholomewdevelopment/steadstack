@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { purchasingApi } from '../../../services/api';
+import { purchasingApi, contactsApi } from '../../../services/api';
 
 export default function VendorBillForm() {
   const navigate = useNavigate();
@@ -37,10 +37,12 @@ export default function VendorBillForm() {
     try {
       setLoading(true);
       const [vendorsRes, receiptsRes] = await Promise.all([
-        purchasingApi.getVendors(),
+        contactsApi.list({ type: 'vendor', activeOnly: 'true' }),
         purchasingApi.getReceipts({ status: 'POSTED' }), // Only posted receipts can be billed
       ]);
-      setVendors(vendorsRes.data?.vendors || []);
+      // Map contacts to vendor format
+      const vendorContacts = vendorsRes.data?.contacts || [];
+      setVendors(vendorContacts.map(c => ({ id: c.id, name: c.name, email: c.email })));
       setReceipts(receiptsRes.data?.receipts || []);
 
       // If receiptId was passed, load that receipt's data

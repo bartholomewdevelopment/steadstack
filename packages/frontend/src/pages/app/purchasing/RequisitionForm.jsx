@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
-import { purchasingApi, inventoryApi } from '../../../services/api';
+import { purchasingApi, inventoryApi, contactsApi } from '../../../services/api';
 
 export default function RequisitionForm() {
   const { id } = useParams();
@@ -32,10 +32,12 @@ export default function RequisitionForm() {
     try {
       const [itemsRes, vendorsRes] = await Promise.all([
         inventoryApi.list({ activeOnly: true }),
-        purchasingApi.getVendors(),
+        contactsApi.list({ type: 'vendor', activeOnly: 'true' }),
       ]);
       setInventoryItems(itemsRes.data?.items || []);
-      setVendors(vendorsRes.data?.vendors || []);
+      // Map contacts to vendor format for backward compatibility
+      const vendorContacts = vendorsRes.data?.contacts || [];
+      setVendors(vendorContacts.map(c => ({ id: c.id, name: c.name, email: c.email })));
     } catch (err) {
       console.error('Error fetching options:', err);
     }
@@ -64,7 +66,7 @@ export default function RequisitionForm() {
     const newLines = [...form.lineItems];
     newLines[index] = { ...newLines[index], [field]: value };
 
-    // Auto-fill description and unit when item is selected
+    // Auto-fill description, unit, and reorder quantity when item is selected
     if (field === 'itemId' && value) {
       const item = inventoryItems.find(i => i.id === value);
       if (item) {
@@ -75,6 +77,10 @@ export default function RequisitionForm() {
         }
         if (item.preferredVendorId) {
           newLines[index].preferredVendorId = item.preferredVendorId;
+        }
+        // Pre-populate with reorder quantity if available
+        if (item.reorderQuantity) {
+          newLines[index].qty = item.reorderQuantity;
         }
       }
     }

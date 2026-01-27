@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
-import { purchasingApi } from '../../../services/api';
+import { purchasingApi, contactsApi } from '../../../services/api';
 import PurchasingNav from '../../../components/purchasing/PurchasingNav';
 
 const statusColors = {
@@ -52,11 +52,13 @@ export default function PurchaseOrdersList() {
 
       const [posRes, vendorsRes] = await Promise.all([
         purchasingApi.getPurchaseOrders(params),
-        purchasingApi.getVendors(),
+        contactsApi.list({ type: 'vendor', activeOnly: 'true' }),
       ]);
 
       setPurchaseOrders(posRes.data?.purchaseOrders || []);
-      setVendors(vendorsRes.data?.vendors || []);
+      // Map contacts to vendor format
+      const vendorContacts = vendorsRes.data?.contacts || [];
+      setVendors(vendorContacts.map(c => ({ id: c.id, name: c.name, email: c.email })));
     } catch (err) {
       setError(err.message);
     } finally {

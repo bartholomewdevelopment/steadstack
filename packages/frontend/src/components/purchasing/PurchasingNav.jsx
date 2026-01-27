@@ -4,7 +4,7 @@ const navItems = [
   { name: 'Requisitions', href: '/app/purchasing/requisitions' },
   { name: 'Purchase Orders', href: '/app/purchasing/purchase-orders' },
   { name: 'Bills', href: '/app/purchasing/bills' },
-  { name: 'Vendors', href: '/app/purchasing/vendors' },
+  { name: 'Vendors', href: '/app/contacts?type=vendor' },
   { name: 'AP Aging', href: '/app/purchasing/ap-aging' },
 ];
 
