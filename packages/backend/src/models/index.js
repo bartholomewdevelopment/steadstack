@@ -9,6 +9,7 @@ const SiteInventory = require('./SiteInventory');
 const Account = require('./Account');
 const LedgerTransaction = require('./LedgerTransaction');
 const LedgerEntry = require('./LedgerEntry');
+const JournalEntry = require('./JournalEntry');
 const Animal = require('./Animal');
 const AnimalGroup = require('./AnimalGroup');
 const Customer = require('./Customer');
@@ -32,6 +33,7 @@ module.exports = {
   Account,
   LedgerTransaction,
   LedgerEntry,
+  JournalEntry,
   Animal,
   AnimalGroup,
   Customer,

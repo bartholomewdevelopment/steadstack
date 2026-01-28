@@ -235,6 +235,9 @@ export default function ChartOfAccounts() {
           <p className="text-gray-600">Manage your general ledger accounts</p>
         </div>
         <div className="flex gap-2">
+          <Link to="/app/accounting/journal-entries/new" className="btn-secondary">
+            Journal Entry
+          </Link>
           <button onClick={() => setShowImportModal(true)} className="btn-secondary">
             Import CSV
           </button>

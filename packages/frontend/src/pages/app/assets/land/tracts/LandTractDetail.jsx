@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { MapsProvider, SiteMap } from '../../../../../components/maps';
-import { landTractsApi, sitesApi } from '../../../../../services/api';
+import { landTractsApi, sitesApi, structuresApi } from '../../../../../services/api';
 import { useSite } from '../../../../../contexts/SiteContext';
 import { formatAcres } from '../../../../../utils/geometry';
+import StructureModal from '../structures/StructureModal';
 
 const typeColors = {
   PARCEL: 'bg-blue-100 text-blue-800',
@@ -13,6 +14,18 @@ const typeColors = {
   OTHER: 'bg-purple-100 text-purple-800',
 };
 
+const structureTypeColors = {
+  BARN: 'bg-amber-100 text-amber-800',
+  SHOP: 'bg-blue-100 text-blue-800',
+  SHED: 'bg-gray-100 text-gray-800',
+  GARAGE: 'bg-slate-100 text-slate-800',
+  GREENHOUSE: 'bg-green-100 text-green-800',
+  COOP: 'bg-orange-100 text-orange-800',
+  HOUSE: 'bg-purple-100 text-purple-800',
+  CONTAINER: 'bg-cyan-100 text-cyan-800',
+  OTHER: 'bg-pink-100 text-pink-800',
+};
+
 export default function LandTractDetail() {
   const { tractId } = useParams();
   const navigate = useNavigate();
@@ -20,9 +33,12 @@ export default function LandTractDetail() {
 
   const [tract, setTract] = useState(null);
   const [site, setSite] = useState(null);
+  const [structures, setStructures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState('');
+  const [showStructureModal, setShowStructureModal] = useState(false);
+  const [editingStructure, setEditingStructure] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -35,9 +51,20 @@ export default function LandTractDetail() {
       const tractData = res.data?.tract;
       setTract(tractData);
 
+      // Fetch site and structures in parallel
+      const promises = [];
       if (tractData?.siteId) {
-        const siteRes = await sitesApi.get(tractData.siteId);
-        setSite(siteRes.data?.site);
+        promises.push(sitesApi.get(tractData.siteId));
+      }
+      promises.push(structuresApi.list({ landTractId: tractId }));
+
+      const results = await Promise.all(promises);
+
+      if (tractData?.siteId) {
+        setSite(results[0].data?.site);
+        setStructures(results[1].data?.structures || []);
+      } else {
+        setStructures(results[0].data?.structures || []);
       }
     } catch (error) {
       console.error('Error fetching land tract:', error);
@@ -45,6 +72,25 @@ export default function LandTractDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchStructures = async () => {
+    try {
+      const res = await structuresApi.list({ landTractId: tractId });
+      setStructures(res.data?.structures || []);
+    } catch (error) {
+      console.error('Error fetching structures:', error);
+    }
+  };
+
+  const handleStructureSaved = () => {
+    fetchStructures();
+    setEditingStructure(null);
+  };
+
+  const handleEditStructure = (structure) => {
+    setEditingStructure(structure);
+    setShowStructureModal(true);
   };
 
   const handleArchive = async () => {
@@ -187,6 +233,92 @@ export default function LandTractDetail() {
           </div>
         </div>
 
+        {/* Structures Section */}
+        <div className="lg:col-span-2 bg-white rounded-lg shadow">
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Structures</h2>
+            <button
+              onClick={() => {
+                setEditingStructure(null);
+                setShowStructureModal(true);
+              }}
+              className="text-sm text-green-600 hover:text-green-700 font-medium"
+            >
+              + Add Structure
+            </button>
+          </div>
+          <div className="p-4">
+            {structures.length === 0 ? (
+              <div className="text-center py-8">
+                <svg
+                  className="mx-auto h-12 w-12 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+                  />
+                </svg>
+                <p className="mt-2 text-sm text-gray-500">No structures defined for this land tract.</p>
+                <button
+                  onClick={() => {
+                    setEditingStructure(null);
+                    setShowStructureModal(true);
+                  }}
+                  className="mt-3 text-sm text-green-600 hover:text-green-700 font-medium"
+                >
+                  Add your first structure
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {structures.map((structure) => (
+                  <div
+                    key={structure.id}
+                    className="py-3 flex items-center justify-between hover:bg-gray-50 -mx-4 px-4"
+                  >
+                    <Link
+                      to={`/app/assets/land/structures/${structure.id}`}
+                      className="flex items-center gap-3 flex-1"
+                    >
+                      <span className="font-medium text-gray-900">{structure.name}</span>
+                      {structure.type && (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                            structureTypeColors[structure.type] || structureTypeColors.OTHER
+                          }`}
+                        >
+                          {structure.type}
+                        </span>
+                      )}
+                    </Link>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleEditStructure(structure);
+                      }}
+                      className="text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Side Panel */}
         <div className="space-y-6">
           {/* Details */}
@@ -294,6 +426,18 @@ export default function LandTractDetail() {
           </div>
         </div>
       </div>
+
+      {/* Structure Modal */}
+      <StructureModal
+        isOpen={showStructureModal}
+        onClose={() => {
+          setShowStructureModal(false);
+          setEditingStructure(null);
+        }}
+        onSave={handleStructureSaved}
+        landTractId={tractId}
+        structure={editingStructure}
+      />
     </div>
   );
 }

@@ -137,6 +137,15 @@
       ]
     },
     {
+      "collectionGroup": "taskOccurrences",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "templateId", "order": "ASCENDING" },
+        { "fieldPath": "runlistId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "purchaseRequisitions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -253,6 +262,41 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "structures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "landTractId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "structures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "areas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "structureId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "sortOrder", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "areas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "structureId", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
         { "fieldPath": "name", "order": "ASCENDING" }
       ]
     }

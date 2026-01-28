@@ -498,6 +498,7 @@ const createInventoryItem = async (tenantId, itemData, createdBy) => {
     reorderQty,
     preferredVendor,
     glAccountCode,
+    binId,
   } = itemData;
 
   // Auto-generate SKU if not provided
@@ -535,6 +536,7 @@ const createInventoryItem = async (tenantId, itemData, createdBy) => {
     reorderQty: reorderQty ?? null,
     preferredVendor: preferredVendor || null,
     glAccountCode: glAccountCode || null,
+    binId: binId || null,
     active: true,
     createdAt: FieldValue.serverTimestamp(),
     createdBy,
@@ -1874,11 +1876,15 @@ const createTaskTemplate = async (tenantId, templateData, createdBy) => {
     requiredSkills,
     requiredEquipment,
     inventoryItemsNeeded,
+    inventoryItems, // New field from frontend
     siteIds,
     animalGroupIds,
+    herdGroupIds, // New field from frontend (maps to animalGroupIds)
+    selectedAnimalIds, // Individual animal IDs selected
     defaultAssigneeId,
     recurrence,
     linkedEventType,
+    tools, // New field: tools needed for task
     active,
   } = templateData;
 
@@ -1911,9 +1917,12 @@ const createTaskTemplate = async (tenantId, templateData, createdBy) => {
     instructions: instructions || null,
     requiredSkills: requiredSkills || [],
     requiredEquipment: requiredEquipment || [],
-    inventoryItemsNeeded: inventoryItemsNeeded || [], // Array of {itemId, qty}
+    // Support both old and new field names for inventory
+    inventoryItems: inventoryItems || inventoryItemsNeeded || [], // Array of {itemId, itemName, quantity, uom, allocationMode}
     siteIds: siteIds || [], // Empty = all sites
-    animalGroupIds: animalGroupIds || [], // For livestock-related tasks
+    // Support both old and new field names for animal groups
+    herdGroupIds: herdGroupIds || animalGroupIds || [], // For livestock-related tasks
+    selectedAnimalIds: selectedAnimalIds || [], // Individual animal IDs
     defaultAssigneeId: defaultAssigneeId || null,
     recurrence: recurrence || {
       pattern: RecurrencePattern.ONCE,
@@ -1925,6 +1934,7 @@ const createTaskTemplate = async (tenantId, templateData, createdBy) => {
       maxOccurrences: null,
     },
     linkedEventType: linkedEventType || null, // e.g., 'FEED_LIVESTOCK' to auto-create event
+    tools: tools || [], // Tools needed for this task
     active: active ?? true,
     createdAt: FieldValue.serverTimestamp(),
     createdBy,
@@ -2317,9 +2327,13 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     assignedToUserId,
     priority,
     notes,
+    // Support both old and new field names
     animalGroupId,
+    herdGroupIds,
     animalIds,
+    selectedAnimalIds,
     inventoryItems,
+    tools,
     linkedEventId,
     // Event fields (for major tasks)
     isEvent,
@@ -2366,9 +2380,11 @@ const createTaskOccurrence = async (tenantId, occurrenceData, createdBy) => {
     estimatedDurationMinutes: template?.estimatedDurationMinutes || 30,
     actualDurationMinutes: null,
     notes: notes || null,
-    animalGroupId: animalGroupId || template?.animalGroupIds?.[0] || null,
-    animalIds: animalIds || [],
-    inventoryItems: inventoryItems || template?.inventoryItemsNeeded || [],
+    // Support both old and new field names for backward compatibility
+    herdGroupIds: herdGroupIds || (animalGroupId ? [animalGroupId] : template?.herdGroupIds || template?.animalGroupIds || []),
+    selectedAnimalIds: selectedAnimalIds || animalIds || template?.selectedAnimalIds || [],
+    inventoryItems: inventoryItems || template?.inventoryItems || template?.inventoryItemsNeeded || [],
+    tools: tools || template?.tools || [],
     inventoryConsumed: [], // Filled in upon completion
     linkedEventId: linkedEventId || null,
     linkedEventType: template?.linkedEventType || null,
@@ -2797,92 +2813,169 @@ const getTaskStats = async (tenantId, options = {}) => {
 };
 
 /**
+ * Generate task occurrences for a single date from active runlists
+ * This is the core generation logic for one day
+ */
+const generateTaskOccurrencesForSingleDate = async (tenantId, targetDate, runlist, createdBy) => {
+  const generatedOccurrences = [];
+
+  // Check if target date is within runlist range
+  const startDate = runlist.startDate?.toDate
+    ? runlist.startDate.toDate()
+    : new Date(runlist.startDate);
+  const endDate = runlist.endDate
+    ? (runlist.endDate.toDate ? runlist.endDate.toDate() : new Date(runlist.endDate))
+    : null;
+  const target = new Date(targetDate);
+
+  if (target < startDate || (endDate && target > endDate)) {
+    return generatedOccurrences; // Outside runlist date range
+  }
+
+  // Get templates for this runlist
+  const templateIds = runlist.templateIds || [];
+  for (const templateId of templateIds) {
+    const template = await getTaskTemplate(tenantId, templateId);
+    if (!template || !template.active) continue;
+
+    // Check if this template should generate for this date based on recurrence
+    const shouldGenerate = checkRecurrenceMatch(template.recurrence, target, startDate);
+
+    if (shouldGenerate) {
+      // Normalize target date to start of day for comparison
+      const startOfDay = new Date(target);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(target);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Check if occurrence already exists for this date/template/runlist
+      const existingOccurrence = await db
+        .collection('tenants')
+        .doc(tenantId)
+        .collection('taskOccurrences')
+        .where('templateId', '==', templateId)
+        .where('runlistId', '==', runlist.id)
+        .where('scheduledDate', '>=', startOfDay)
+        .where('scheduledDate', '<=', endOfDay)
+        .limit(1)
+        .get();
+
+      if (existingOccurrence.empty) {
+        // Normalize scheduled date to start of day
+        const normalizedScheduledDate = new Date(target);
+        normalizedScheduledDate.setHours(0, 0, 0, 0);
+
+        // Calculate due date (end of day by default)
+        const dueDate = new Date(target);
+        dueDate.setHours(23, 59, 59, 999);
+
+        const occurrence = await createTaskOccurrence(
+          tenantId,
+          {
+            templateId,
+            runlistId: runlist.id,
+            siteId: runlist.siteId || template.siteIds?.[0] || null,
+            scheduledDate: normalizedScheduledDate,
+            scheduledTime: runlist.scheduleTime || '08:00',
+            dueDate,
+            assignedToUserId: runlist.defaultAssigneeId || template.defaultAssigneeId || null,
+            priority: template.priority,
+            // Support both old and new field names for backward compatibility
+            herdGroupIds: template.herdGroupIds || template.animalGroupIds || [],
+            selectedAnimalIds: template.selectedAnimalIds || [],
+            inventoryItems: template.inventoryItems || template.inventoryItemsNeeded || [],
+            tools: template.tools || [],
+          },
+          createdBy
+        );
+
+        generatedOccurrences.push(occurrence);
+      }
+    }
+  }
+
+  return generatedOccurrences;
+};
+
+/**
  * Generate task occurrences for a date range from active runlists
- * This is called by the scheduler
+ * This catches up on ALL missed days, not just the target date
+ * If tasks weren't generated for 4 days, it will create tasks for all 4 days
  */
 const generateTaskOccurrencesForDate = async (tenantId, targetDate, createdBy) => {
   // Get all active runlists
   const activeRunlists = await getRunlists(tenantId, { status: RunlistStatus.ACTIVE });
   const generatedOccurrences = [];
+  const target = new Date(targetDate);
+  target.setHours(23, 59, 59, 999); // End of target day
 
   for (const runlist of activeRunlists) {
-    // Check if target date is within runlist range
-    const startDate = runlist.startDate?.toDate
+    // Determine the start date for generation
+    // Use the later of: runlist start date, or day after last generation
+    const runlistStartDate = runlist.startDate?.toDate
       ? runlist.startDate.toDate()
       : new Date(runlist.startDate);
-    const endDate = runlist.endDate
-      ? (runlist.endDate.toDate ? runlist.endDate.toDate() : new Date(runlist.endDate))
-      : null;
-    const target = new Date(targetDate);
 
-    if (target < startDate || (endDate && target > endDate)) {
-      continue; // Outside runlist date range
+    let generateFromDate;
+    if (runlist.lastGeneratedAt) {
+      // Start from the day AFTER last generation
+      const lastGen = runlist.lastGeneratedAt.toDate
+        ? runlist.lastGeneratedAt.toDate()
+        : new Date(runlist.lastGeneratedAt);
+      generateFromDate = new Date(lastGen);
+      generateFromDate.setDate(generateFromDate.getDate() + 1);
+      generateFromDate.setHours(0, 0, 0, 0);
+
+      // But not before the runlist start date
+      if (generateFromDate < runlistStartDate) {
+        generateFromDate = new Date(runlistStartDate);
+      }
+    } else {
+      // Never generated before, start from runlist start date
+      generateFromDate = new Date(runlistStartDate);
+    }
+    generateFromDate.setHours(0, 0, 0, 0);
+
+    // Don't generate for dates before the runlist start
+    if (generateFromDate < runlistStartDate) {
+      generateFromDate = new Date(runlistStartDate);
+      generateFromDate.setHours(0, 0, 0, 0);
     }
 
-    // Get templates for this runlist
-    const templateIds = runlist.templateIds || [];
-    for (const templateId of templateIds) {
-      const template = await getTaskTemplate(tenantId, templateId);
-      if (!template || !template.active) continue;
+    // Check if there's a date range to generate
+    const targetStart = new Date(targetDate);
+    targetStart.setHours(0, 0, 0, 0);
 
-      // Check if this template should generate for this date based on recurrence
-      const shouldGenerate = checkRecurrenceMatch(template.recurrence, target, startDate);
+    if (generateFromDate > targetStart) {
+      // Already generated up to or past target date
+      continue;
+    }
 
-      if (shouldGenerate) {
-        // Normalize target date to start of day for comparison
-        const startOfDay = new Date(target);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(target);
-        endOfDay.setHours(23, 59, 59, 999);
+    // Generate for each day from generateFromDate to targetDate (inclusive)
+    const currentDate = new Date(generateFromDate);
+    let runlistOccurrencesCount = 0;
 
-        // Check if occurrence already exists for this date/template/runlist
-        const existingOccurrence = await db
-          .collection('tenants')
-          .doc(tenantId)
-          .collection('taskOccurrences')
-          .where('templateId', '==', templateId)
-          .where('runlistId', '==', runlist.id)
-          .where('scheduledDate', '>=', startOfDay)
-          .where('scheduledDate', '<=', endOfDay)
-          .limit(1)
-          .get();
+    while (currentDate <= targetStart) {
+      const occurrences = await generateTaskOccurrencesForSingleDate(
+        tenantId,
+        currentDate,
+        runlist,
+        createdBy
+      );
+      generatedOccurrences.push(...occurrences);
+      runlistOccurrencesCount += occurrences.length;
 
-        if (existingOccurrence.empty) {
-          // Normalize scheduled date to start of day
-          const normalizedScheduledDate = new Date(target);
-          normalizedScheduledDate.setHours(0, 0, 0, 0);
-
-          // Calculate due date (end of day by default)
-          const dueDate = new Date(target);
-          dueDate.setHours(23, 59, 59, 999);
-
-          const occurrence = await createTaskOccurrence(
-            tenantId,
-            {
-              templateId,
-              runlistId: runlist.id,
-              siteId: runlist.siteId || template.siteIds?.[0] || null,
-              scheduledDate: normalizedScheduledDate,
-              scheduledTime: runlist.scheduleTime || '08:00',
-              dueDate,
-              assignedToUserId: runlist.defaultAssigneeId || template.defaultAssigneeId || null,
-              priority: template.priority,
-              animalGroupId: template.animalGroupIds?.[0] || null,
-              inventoryItems: template.inventoryItemsNeeded || [],
-            },
-            createdBy
-          );
-
-          generatedOccurrences.push(occurrence);
-        }
-      }
+      // Move to next day
+      currentDate.setDate(currentDate.getDate() + 1);
     }
 
     // Update runlist generation tracking
-    await updateRunlist(tenantId, runlist.id, {
-      lastGeneratedAt: FieldValue.serverTimestamp(),
-      totalOccurrencesGenerated: FieldValue.increment(generatedOccurrences.length),
-    });
+    if (runlistOccurrencesCount > 0 || generateFromDate <= targetStart) {
+      await updateRunlist(tenantId, runlist.id, {
+        lastGeneratedAt: FieldValue.serverTimestamp(),
+        totalOccurrencesGenerated: FieldValue.increment(runlistOccurrencesCount),
+      });
+    }
   }
 
   return generatedOccurrences;
@@ -3578,6 +3671,540 @@ const getLandTractStats = async (tenantId, options = {}) => {
   return stats;
 };
 
+// ============================================================================
+// STRUCTURES
+// ============================================================================
+
+/**
+ * Structure types
+ */
+const StructureType = {
+  BARN: 'BARN',
+  SHOP: 'SHOP',
+  SHED: 'SHED',
+  GARAGE: 'GARAGE',
+  GREENHOUSE: 'GREENHOUSE',
+  COOP: 'COOP',
+  HOUSE: 'HOUSE',
+  CONTAINER: 'CONTAINER',
+  OTHER: 'OTHER',
+};
+
+/**
+ * Get structures for a tenant
+ * @param {string} tenantId
+ * @param {object} options - { landTractId, isActive }
+ */
+const getStructures = async (tenantId, options = {}) => {
+  const { landTractId, isActive = true } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('structures');
+
+  if (landTractId) {
+    query = query.where('landTractId', '==', landTractId);
+  }
+
+  if (isActive !== undefined && isActive !== null) {
+    query = query.where('isActive', '==', isActive);
+  }
+
+  const snapshot = await query.get();
+
+  let results = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort by name client-side
+  results.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  return results;
+};
+
+/**
+ * Get a single structure
+ */
+const getStructure = async (tenantId, structureId) => {
+  const structureDoc = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('structures')
+    .doc(structureId)
+    .get();
+
+  if (!structureDoc.exists) {
+    return null;
+  }
+
+  return {
+    id: structureDoc.id,
+    ...structureDoc.data(),
+  };
+};
+
+/**
+ * Create a new structure
+ */
+const createStructure = async (tenantId, structureData) => {
+  const structureRef = db.collection('tenants').doc(tenantId).collection('structures').doc();
+
+  // Remove undefined values to prevent Firestore errors
+  const cleanData = Object.fromEntries(
+    Object.entries(structureData).filter(([_, v]) => v !== undefined)
+  );
+
+  const structure = {
+    ...cleanData,
+    tenantId,
+    isActive: true,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await structureRef.set(structure);
+
+  return {
+    id: structureRef.id,
+    ...structure,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+};
+
+/**
+ * Update a structure
+ */
+const updateStructure = async (tenantId, structureId, updates) => {
+  const structureRef = db.collection('tenants').doc(tenantId).collection('structures').doc(structureId);
+
+  // Remove undefined values
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([_, v]) => v !== undefined)
+  );
+
+  await structureRef.update({
+    ...cleanUpdates,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return getStructure(tenantId, structureId);
+};
+
+/**
+ * Soft delete a structure and cascade to its areas and bins
+ */
+const deleteStructure = async (tenantId, structureId) => {
+  const batch = db.batch();
+
+  // Soft delete the structure
+  const structureRef = db.collection('tenants').doc(tenantId).collection('structures').doc(structureId);
+  batch.update(structureRef, {
+    isActive: false,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Find and soft delete all areas for this structure
+  const areasSnapshot = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('areas')
+    .where('structureId', '==', structureId)
+    .where('isActive', '==', true)
+    .get();
+
+  areasSnapshot.docs.forEach(doc => {
+    batch.update(doc.ref, {
+      isActive: false,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  // Find and soft delete all bins for this structure
+  const binsSnapshot = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('bins')
+    .where('structureId', '==', structureId)
+    .where('isActive', '==', true)
+    .get();
+
+  binsSnapshot.docs.forEach(doc => {
+    batch.update(doc.ref, {
+      isActive: false,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  await batch.commit();
+
+  return { deleted: true, areasAffected: areasSnapshot.size, binsAffected: binsSnapshot.size };
+};
+
+// ============================================================================
+// AREAS
+// ============================================================================
+
+/**
+ * Get areas for a structure
+ * @param {string} tenantId
+ * @param {object} options - { structureId, isActive }
+ */
+const getAreas = async (tenantId, options = {}) => {
+  const { structureId, isActive = true } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('areas');
+
+  if (structureId) {
+    query = query.where('structureId', '==', structureId);
+  }
+
+  if (isActive !== undefined && isActive !== null) {
+    query = query.where('isActive', '==', isActive);
+  }
+
+  const snapshot = await query.get();
+
+  let results = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort by sortOrder, then name
+  results.sort((a, b) => {
+    const orderDiff = (a.sortOrder || 0) - (b.sortOrder || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  return results;
+};
+
+/**
+ * Get a single area
+ */
+const getArea = async (tenantId, areaId) => {
+  const areaDoc = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('areas')
+    .doc(areaId)
+    .get();
+
+  if (!areaDoc.exists) {
+    return null;
+  }
+
+  return {
+    id: areaDoc.id,
+    ...areaDoc.data(),
+  };
+};
+
+/**
+ * Create a new area
+ */
+const createArea = async (tenantId, areaData) => {
+  const areaRef = db.collection('tenants').doc(tenantId).collection('areas').doc();
+
+  // Remove undefined values to prevent Firestore errors
+  const cleanData = Object.fromEntries(
+    Object.entries(areaData).filter(([_, v]) => v !== undefined)
+  );
+
+  const area = {
+    ...cleanData,
+    tenantId,
+    sortOrder: cleanData.sortOrder || 0,
+    isActive: true,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await areaRef.set(area);
+
+  return {
+    id: areaRef.id,
+    ...area,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+};
+
+/**
+ * Update an area
+ */
+const updateArea = async (tenantId, areaId, updates) => {
+  const areaRef = db.collection('tenants').doc(tenantId).collection('areas').doc(areaId);
+
+  // Remove undefined values
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([_, v]) => v !== undefined)
+  );
+
+  await areaRef.update({
+    ...cleanUpdates,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return getArea(tenantId, areaId);
+};
+
+/**
+ * Soft delete an area and cascade to its bins
+ */
+const deleteArea = async (tenantId, areaId) => {
+  const batch = db.batch();
+
+  // Soft delete the area
+  const areaRef = db.collection('tenants').doc(tenantId).collection('areas').doc(areaId);
+  batch.update(areaRef, {
+    isActive: false,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Find and soft delete all bins for this area
+  const binsSnapshot = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('bins')
+    .where('areaId', '==', areaId)
+    .where('isActive', '==', true)
+    .get();
+
+  binsSnapshot.docs.forEach(doc => {
+    batch.update(doc.ref, {
+      isActive: false,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  await batch.commit();
+
+  return { deleted: true, binsAffected: binsSnapshot.size };
+};
+
+// ============================================================================
+// BINS (Storage Locations)
+// ============================================================================
+
+const BinType = {
+  SHELF: 'SHELF',
+  DRAWER: 'DRAWER',
+  TOTE: 'TOTE',
+  PALLET: 'PALLET',
+  RACK: 'RACK',
+  HOOK: 'HOOK',
+  FLOOR: 'FLOOR',
+  CABINET: 'CABINET',
+  TOOLBOX: 'TOOLBOX',
+  MOBILE: 'MOBILE',
+  OTHER: 'OTHER',
+};
+
+/**
+ * Normalize bin code: uppercase, replace spaces with hyphens, remove invalid chars
+ */
+const normalizeBinCode = (code) => {
+  if (!code) return null;
+  return code
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Z0-9-]/g, '')
+    .substring(0, 30);
+};
+
+/**
+ * Check if a bin code is unique within a tenant
+ */
+const isBinCodeUnique = async (tenantId, code, excludeBinId = null) => {
+  const normalizedCode = normalizeBinCode(code);
+  if (!normalizedCode) return false;
+
+  const snapshot = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('bins')
+    .where('code', '==', normalizedCode)
+    .where('isActive', '==', true)
+    .get();
+
+  if (snapshot.empty) return true;
+
+  // If excluding a bin (for updates), check if the only match is that bin
+  if (excludeBinId) {
+    return snapshot.docs.every(doc => doc.id === excludeBinId);
+  }
+
+  return false;
+};
+
+/**
+ * Get bins with optional filters
+ * @param {string} tenantId
+ * @param {object} options - { structureId, areaId, type, isActive }
+ */
+const getBins = async (tenantId, options = {}) => {
+  const { structureId, areaId, type, isActive = true } = options;
+
+  let query = db.collection('tenants').doc(tenantId).collection('bins');
+
+  if (structureId) {
+    query = query.where('structureId', '==', structureId);
+  }
+
+  if (areaId !== undefined) {
+    query = query.where('areaId', '==', areaId);
+  }
+
+  if (type) {
+    query = query.where('type', '==', type);
+  }
+
+  if (isActive !== undefined && isActive !== null) {
+    query = query.where('isActive', '==', isActive);
+  }
+
+  const snapshot = await query.get();
+
+  let results = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort by code
+  results.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+
+  return results;
+};
+
+/**
+ * Get a single bin
+ */
+const getBin = async (tenantId, binId) => {
+  const binDoc = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('bins')
+    .doc(binId)
+    .get();
+
+  if (!binDoc.exists) return null;
+
+  return {
+    id: binDoc.id,
+    ...binDoc.data(),
+  };
+};
+
+/**
+ * Create a new bin
+ */
+const createBin = async (tenantId, binData) => {
+  // Normalize and validate code
+  const normalizedCode = normalizeBinCode(binData.code);
+  if (!normalizedCode || normalizedCode.length < 2) {
+    throw new Error('Bin code must be at least 2 characters');
+  }
+
+  // Check uniqueness
+  const isUnique = await isBinCodeUnique(tenantId, normalizedCode);
+  if (!isUnique) {
+    throw new Error(`Bin code "${normalizedCode}" is already in use`);
+  }
+
+  const binRef = db.collection('tenants').doc(tenantId).collection('bins').doc();
+
+  const bin = {
+    structureId: binData.structureId,
+    landTractId: binData.landTractId || null,
+    areaId: binData.areaId || null,
+    name: binData.name,
+    code: normalizedCode,
+    type: binData.type || null,
+    notes: binData.notes || null,
+    capacity: binData.capacity || null,
+    createdBy: binData.createdBy || null,
+    updatedBy: binData.updatedBy || null,
+    isActive: true,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await binRef.set(bin);
+
+  return {
+    id: binRef.id,
+    ...bin,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+};
+
+/**
+ * Update a bin
+ */
+const updateBin = async (tenantId, binId, updates) => {
+  const binRef = db.collection('tenants').doc(tenantId).collection('bins').doc(binId);
+
+  // If updating code, normalize and validate
+  if (updates.code) {
+    const normalizedCode = normalizeBinCode(updates.code);
+    if (!normalizedCode || normalizedCode.length < 2) {
+      throw new Error('Bin code must be at least 2 characters');
+    }
+
+    // Check uniqueness (excluding current bin)
+    const isUnique = await isBinCodeUnique(tenantId, normalizedCode, binId);
+    if (!isUnique) {
+      throw new Error(`Bin code "${normalizedCode}" is already in use`);
+    }
+
+    updates.code = normalizedCode;
+  }
+
+  // Remove undefined values
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([_, v]) => v !== undefined)
+  );
+
+  await binRef.update({
+    ...cleanUpdates,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return getBin(tenantId, binId);
+};
+
+/**
+ * Soft delete a bin
+ */
+const deleteBin = async (tenantId, binId) => {
+  const binRef = db.collection('tenants').doc(tenantId).collection('bins').doc(binId);
+
+  await binRef.update({
+    isActive: false,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return { deleted: true };
+};
+
+/**
+ * Get bin count for a structure (for stats)
+ */
+const getBinsCountByStructure = async (tenantId, structureId) => {
+  const snapshot = await db
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('bins')
+    .where('structureId', '==', structureId)
+    .where('isActive', '==', true)
+    .get();
+
+  return snapshot.size;
+};
+
 module.exports = {
   // Tenant
   createTenant,
@@ -3718,4 +4345,29 @@ module.exports = {
   createLandTract,
   updateLandTract,
   getLandTractStats,
+
+  // Structures
+  StructureType,
+  getStructures,
+  getStructure,
+  createStructure,
+  updateStructure,
+  deleteStructure,
+
+  // Areas
+  getAreas,
+  getArea,
+  createArea,
+  updateArea,
+  deleteArea,
+
+  // Bins
+  BinType,
+  getBins,
+  getBin,
+  createBin,
+  updateBin,
+  deleteBin,
+  getBinsCountByStructure,
+  isBinCodeUnique,
 };

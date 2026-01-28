@@ -14,6 +14,9 @@ const accountingRoutes = require('./accounting');
 const assetsRoutes = require('./assets');
 const vehiclesRoutes = require('./vehicles');
 const landTractsRoutes = require('./landTracts');
+const structuresRoutes = require('./structures');
+const areasRoutes = require('./areas');
+const binsRoutes = require('./bins');
 const purchasingRoutes = require('./purchasing');
 const contactsRoutes = require('./contacts');
 
@@ -34,6 +37,9 @@ router.use('/accounting', accountingRoutes);
 router.use('/assets', assetsRoutes);
 router.use('/vehicles', vehiclesRoutes);
 router.use('/land-tracts', landTractsRoutes);
+router.use('/structures', structuresRoutes);
+router.use('/areas', areasRoutes);
+router.use('/bins', binsRoutes);
 router.use('/purchasing', purchasingRoutes);
 router.use('/contacts', contactsRoutes);
 

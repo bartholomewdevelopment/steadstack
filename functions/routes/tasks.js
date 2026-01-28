@@ -3,6 +3,7 @@ const { body, param, validationResult } = require('express-validator');
 const { verifyToken } = require('../middleware/auth');
 const firestoreService = require('../services/firestore');
 const accountingService = require('../services/accounting');
+const taskInventoryService = require('../services/task-inventory-service');
 const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
@@ -1002,6 +1003,64 @@ router.post(
         req.firebaseUser.uid
       );
 
+      // Consume inventory items if the task has inventory requirements
+      let inventoryConsumptionResult = null;
+      const taskInventoryItems = currentOccurrence.inventoryItems || [];
+
+      if (taskInventoryItems.length > 0 && occurrence.siteId) {
+        try {
+          // Calculate animal count for PER_ANIMAL allocation
+          let animalCount = 0;
+          if (currentOccurrence.animalIds && currentOccurrence.animalIds.length > 0) {
+            animalCount = currentOccurrence.animalIds.length;
+          } else if (currentOccurrence.animalGroupIds && currentOccurrence.animalGroupIds.length > 0) {
+            // Get total animal count from all groups
+            for (const groupId of currentOccurrence.animalGroupIds) {
+              try {
+                const group = await firestoreService.getAnimalGroup(tenantId, groupId);
+                if (group && group.currentCount) {
+                  animalCount += group.currentCount;
+                }
+              } catch (groupErr) {
+                console.warn(`[Task Complete] Could not get animal count for group ${groupId}:`, groupErr.message);
+              }
+            }
+          }
+
+          console.log(`[Task Complete] Consuming inventory for task ${req.params.id}:`, {
+            siteId: occurrence.siteId,
+            itemCount: taskInventoryItems.length,
+            animalCount,
+          });
+
+          inventoryConsumptionResult = await taskInventoryService.consumeInventoryForTask(
+            tenantId,
+            occurrence.siteId,
+            { id: req.params.id, templateId: currentOccurrence.templateId },
+            taskInventoryItems,
+            animalCount
+          );
+
+          console.log(`[Task Complete] Inventory consumption result:`, {
+            movementCount: inventoryConsumptionResult.movements.length,
+            totalCost: inventoryConsumptionResult.totalCost,
+          });
+
+          // Update occurrence with consumption info
+          await firestoreService.updateTaskOccurrence(tenantId, req.params.id, {
+            inventoryConsumed: inventoryConsumptionResult.movements,
+            inventoryConsumptionCost: inventoryConsumptionResult.totalCost,
+          });
+
+          occurrence.inventoryConsumed = inventoryConsumptionResult.movements;
+          occurrence.inventoryConsumptionCost = inventoryConsumptionResult.totalCost;
+        } catch (invError) {
+          console.error('[Task Complete] Error consuming inventory:', invError);
+          // Don't fail task completion, just log the error
+          inventoryConsumptionResult = { error: invError.message };
+        }
+      }
+
       // Create linked event if requested and template has linkedEventType
       let linkedEvent = null;
       if (createLinkedEvent && currentOccurrence.linkedEventType) {
@@ -1136,7 +1195,7 @@ router.post(
 
       res.json({
         success: true,
-        data: { occurrence, linkedEvent, postingResult },
+        data: { occurrence, linkedEvent, postingResult, inventoryConsumptionResult },
       });
     } catch (error) {
       console.error('Error completing task:', error);

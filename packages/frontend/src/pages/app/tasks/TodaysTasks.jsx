@@ -183,7 +183,35 @@ function SortableTaskItem({
           {task.estimatedDurationMinutes && (
             <span>{task.estimatedDurationMinutes} min</span>
           )}
-          {task.scheduledTime && <span>{task.scheduledTime}</span>}
+          {/* Date and Time display */}
+          <span className="flex items-center gap-1">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+            </svg>
+            {(() => {
+              try {
+                // Handle Firestore Timestamp, ISO string, or Date object
+                let d;
+                if (task.scheduledDate?._seconds) {
+                  // Firestore Timestamp serialized
+                  d = new Date(task.scheduledDate._seconds * 1000);
+                } else if (task.scheduledDate?.toDate) {
+                  // Firestore Timestamp object
+                  d = task.scheduledDate.toDate();
+                } else if (typeof task.scheduledDate === 'string') {
+                  // ISO string - parse carefully
+                  d = new Date(task.scheduledDate);
+                } else {
+                  d = new Date(task.scheduledDate);
+                }
+                if (isNaN(d.getTime())) return 'No date';
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              } catch {
+                return 'No date';
+              }
+            })()}
+            {task.scheduledTime && ` @ ${task.scheduledTime}`}
+          </span>
           {task.isEvent && task.totalCost > 0 && (
             <span className="text-amber-600 font-medium">${task.totalCost.toFixed(2)}</span>
           )}
@@ -316,14 +344,42 @@ export default function TodaysTasks() {
       setLoading(true);
       setError(null);
 
+      // Fetch ALL uncompleted tasks from all dates up to selected date
+      // This ensures overdue/pending tasks accumulate if not completed
       const params = {
         siteId: currentSite.id,
-        startDate: selectedDate,
-        endDate: selectedDate,
+        endDate: selectedDate, // Include tasks up to selected date
+        limit: 200, // Increase limit to get more tasks
       };
 
       const response = await tasksApi.listOccurrences(params);
-      const occurrences = response.data?.occurrences || [];
+      let occurrences = response.data?.occurrences || [];
+
+      // Show ALL uncompleted tasks from any date, plus completed tasks from selected date only
+      const selectedDateStr = selectedDate;
+      occurrences = occurrences.filter(task => {
+        const isPending = ['SCHEDULED', 'IN_PROGRESS', 'OVERDUE'].includes(task.status);
+
+        // Show all pending/incomplete tasks regardless of date
+        if (isPending) return true;
+
+        // For completed/skipped/cancelled, only show if from selected date
+        try {
+          let taskDate;
+          if (task.scheduledDate?._seconds) {
+            // Firestore Timestamp serialized
+            taskDate = new Date(task.scheduledDate._seconds * 1000).toISOString().split('T')[0];
+          } else if (typeof task.scheduledDate === 'string') {
+            taskDate = task.scheduledDate.split('T')[0];
+          } else {
+            taskDate = new Date(task.scheduledDate).toISOString().split('T')[0];
+          }
+          return taskDate === selectedDateStr;
+        } catch {
+          return false;
+        }
+      });
+
       setTasks(occurrences);
     } catch (err) {
       setError(err.message);

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
-import { tasksApi, landTractsApi, animalsApi } from '../../../services/api';
+import { tasksApi, landTractsApi, animalsApi, inventoryApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 // Categories that could involve livestock
@@ -70,7 +70,6 @@ export default function TaskForm() {
     estimatedDurationMinutes: '',
     landTractId: '',
     instructions: '',
-    requiredEquipment: [],
     siteIds: [],
     defaultAssigneeId: '',
     recurrence: {
@@ -80,15 +79,21 @@ export default function TaskForm() {
       dayOfMonth: null,
     },
     active: true,
-    herdGroupId: '',
+    herdGroupIds: [], // Changed from herdGroupId to support multiple
     selectedAnimalIds: [],
+    // Inventory items needed for this task
+    inventoryItems: [], // Array of { itemId, itemName, quantity, uom, allocationMode: 'TOTAL' | 'PER_ANIMAL' }
+    // Tools needed for this task
+    tools: [],
   });
 
-  const [equipmentInput, setEquipmentInput] = useState('');
+  const [toolInput, setToolInput] = useState('');
   const [landTracts, setLandTracts] = useState([]);
   const [animalGroups, setAnimalGroups] = useState([]);
-  const [animalsInGroup, setAnimalsInGroup] = useState([]);
+  const [animalsInGroups, setAnimalsInGroups] = useState([]); // Animals from all selected groups
   const [loadingAnimals, setLoadingAnimals] = useState(false);
+  const [inventoryCatalog, setInventoryCatalog] = useState([]);
+  const [loadingInventory, setLoadingInventory] = useState(false);
 
   useEffect(() => {
     if (isEditing) {
@@ -96,16 +101,17 @@ export default function TaskForm() {
     }
     fetchLandTracts();
     fetchAnimalGroups();
+    fetchInventoryCatalog();
   }, [id]);
 
-  // Fetch animals when herd/group changes
+  // Fetch animals when herd/groups change
   useEffect(() => {
-    if (form.herdGroupId) {
-      fetchAnimalsInGroup(form.herdGroupId);
+    if (form.herdGroupIds.length > 0) {
+      fetchAnimalsInGroups(form.herdGroupIds);
     } else {
-      setAnimalsInGroup([]);
+      setAnimalsInGroups([]);
     }
-  }, [form.herdGroupId]);
+  }, [form.herdGroupIds]);
 
   const fetchLandTracts = async () => {
     try {
@@ -129,22 +135,54 @@ export default function TaskForm() {
     }
   };
 
-  const fetchAnimalsInGroup = async (groupId) => {
+  const fetchAnimalsInGroups = async (groupIds) => {
     setLoadingAnimals(true);
     try {
-      // Include siteId in the query for proper filtering
-      const response = await animalsApi.list({
-        groupId,
-        siteId: currentSite?.id,
-        limit: 200
+      // Fetch animals from all selected groups in parallel
+      const responses = await Promise.all(
+        groupIds.map((groupId) =>
+          animalsApi.list({
+            groupId,
+            siteId: currentSite?.id,
+            limit: 200,
+          })
+        )
+      );
+
+      // Combine all animals and tag them with their group info
+      const allAnimals = [];
+      responses.forEach((response, index) => {
+        const animals = response?.data?.animals || response?.animals || [];
+        const groupId = groupIds[index];
+        const group = animalGroups.find((g) => (g.id || g._id) === groupId);
+        animals.forEach((animal) => {
+          allAnimals.push({
+            ...animal,
+            _groupId: groupId,
+            _groupName: group?.name || 'Unknown Group',
+          });
+        });
       });
-      const animals = response?.data?.animals || response?.animals || [];
-      setAnimalsInGroup(Array.isArray(animals) ? animals : []);
+      setAnimalsInGroups(allAnimals);
     } catch (err) {
-      console.error('Failed to fetch animals in group:', err);
-      setAnimalsInGroup([]);
+      console.error('Failed to fetch animals in groups:', err);
+      setAnimalsInGroups([]);
     } finally {
       setLoadingAnimals(false);
+    }
+  };
+
+  const fetchInventoryCatalog = async () => {
+    setLoadingInventory(true);
+    try {
+      const response = await inventoryApi.list({ limit: 200 });
+      const items = response?.data?.items || response?.items || [];
+      setInventoryCatalog(Array.isArray(items) ? items : []);
+    } catch (err) {
+      console.error('Failed to fetch inventory catalog:', err);
+      setInventoryCatalog([]);
+    } finally {
+      setLoadingInventory(false);
     }
   };
 
@@ -154,6 +192,12 @@ export default function TaskForm() {
       const response = await tasksApi.getTemplate(id);
       const template = response.data?.template || response.template || response.data;
 
+      // Handle backward compatibility: convert old herdGroupId to herdGroupIds array
+      let herdGroupIds = template.herdGroupIds || [];
+      if (herdGroupIds.length === 0 && template.herdGroupId) {
+        herdGroupIds = [template.herdGroupId];
+      }
+
       setForm({
         name: template.name || '',
         description: template.description || '',
@@ -162,7 +206,6 @@ export default function TaskForm() {
         estimatedDurationMinutes: template.estimatedDurationMinutes || '',
         landTractId: template.landTractId || '',
         instructions: template.instructions || '',
-        requiredEquipment: template.requiredEquipment || [],
         siteIds: template.siteIds || [],
         defaultAssigneeId: template.defaultAssigneeId || '',
         recurrence: template.recurrence || {
@@ -172,8 +215,10 @@ export default function TaskForm() {
           dayOfMonth: null,
         },
         active: template.active !== false,
-        herdGroupId: template.herdGroupId || '',
+        herdGroupIds,
         selectedAnimalIds: template.selectedAnimalIds || [],
+        inventoryItems: template.inventoryItems || [],
+        tools: template.tools || [],
       });
     } catch (err) {
       setError(err.message);
@@ -216,6 +261,24 @@ export default function TaskForm() {
     });
   };
 
+  const handleHerdGroupToggle = (groupId) => {
+    setForm((prev) => {
+      const current = prev.herdGroupIds || [];
+      const updated = current.includes(groupId)
+        ? current.filter((id) => id !== groupId)
+        : [...current, groupId];
+      return {
+        ...prev,
+        herdGroupIds: updated,
+        // Keep only animals that belong to still-selected groups
+        selectedAnimalIds: prev.selectedAnimalIds.filter((animalId) => {
+          const animal = animalsInGroups.find((a) => (a.id || a._id) === animalId);
+          return animal && updated.includes(animal._groupId);
+        }),
+      };
+    });
+  };
+
   const handleAnimalToggle = (animalId) => {
     setForm((prev) => {
       const current = prev.selectedAnimalIds || [];
@@ -230,7 +293,7 @@ export default function TaskForm() {
   };
 
   const handleSelectAllAnimals = () => {
-    const allAnimalIds = animalsInGroup.map((a) => a.id || a._id);
+    const allAnimalIds = animalsInGroups.map((a) => a.id || a._id);
     const allSelected = allAnimalIds.every((id) => form.selectedAnimalIds.includes(id));
 
     setForm((prev) => ({
@@ -239,24 +302,67 @@ export default function TaskForm() {
     }));
   };
 
-  const isLivestockCategory = livestockCategories.includes(form.category);
-
-  const handleAddEquipment = () => {
-    if (equipmentInput.trim()) {
+  // Tool handlers
+  const handleAddTool = () => {
+    if (toolInput.trim()) {
       setForm((prev) => ({
         ...prev,
-        requiredEquipment: [...prev.requiredEquipment, equipmentInput.trim()],
+        tools: [...prev.tools, toolInput.trim()],
       }));
-      setEquipmentInput('');
+      setToolInput('');
     }
   };
 
-  const handleRemoveEquipment = (index) => {
+  const handleRemoveTool = (index) => {
     setForm((prev) => ({
       ...prev,
-      requiredEquipment: prev.requiredEquipment.filter((_, i) => i !== index),
+      tools: prev.tools.filter((_, i) => i !== index),
     }));
   };
+
+  // Inventory handlers
+  const handleAddInventoryItem = (itemId) => {
+    const item = inventoryCatalog.find((i) => (i.id || i._id) === itemId);
+    if (!item) return;
+
+    // Don't add duplicates
+    if (form.inventoryItems.some((i) => i.itemId === itemId)) return;
+
+    setForm((prev) => ({
+      ...prev,
+      inventoryItems: [
+        ...prev.inventoryItems,
+        {
+          itemId,
+          itemName: item.name,
+          quantity: '',
+          uom: item.uom || 'units',
+          allocationMode: 'TOTAL', // Default to total allocation
+        },
+      ],
+    }));
+  };
+
+  const handleRemoveInventoryItem = (index) => {
+    setForm((prev) => ({
+      ...prev,
+      inventoryItems: prev.inventoryItems.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleInventoryItemChange = (index, field, value) => {
+    setForm((prev) => ({
+      ...prev,
+      inventoryItems: prev.inventoryItems.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
+      ),
+    }));
+  };
+
+  // Calculate total animals selected for inventory calculations
+  const totalAnimalsSelected = form.selectedAnimalIds.length;
+
+  const isLivestockCategory = livestockCategories.includes(form.category);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -270,12 +376,19 @@ export default function TaskForm() {
     setError(null);
 
     try {
+      // Process inventory items to include calculated values
+      const processedInventoryItems = form.inventoryItems.map((item) => ({
+        ...item,
+        quantity: parseFloat(item.quantity) || 0,
+      }));
+
       const data = {
         ...form,
         estimatedDurationMinutes: form.estimatedDurationMinutes
           ? parseInt(form.estimatedDurationMinutes)
           : undefined,
         siteIds: form.siteIds.length > 0 ? form.siteIds : [currentSite.id],
+        inventoryItems: processedInventoryItems,
       };
 
       // Clean up empty fields
@@ -283,8 +396,10 @@ export default function TaskForm() {
       if (!data.instructions) delete data.instructions;
       if (!data.defaultAssigneeId) delete data.defaultAssigneeId;
       if (!data.landTractId) delete data.landTractId;
-      if (!data.herdGroupId) delete data.herdGroupId;
+      if (!data.herdGroupIds || data.herdGroupIds.length === 0) delete data.herdGroupIds;
       if (!data.selectedAnimalIds || data.selectedAnimalIds.length === 0) delete data.selectedAnimalIds;
+      if (!data.inventoryItems || data.inventoryItems.length === 0) delete data.inventoryItems;
+      if (!data.tools || data.tools.length === 0) delete data.tools;
 
       if (isEditing) {
         await tasksApi.updateTemplate(id, data);
@@ -416,30 +531,53 @@ export default function TaskForm() {
                   <span>🐄</span> Livestock Selection
                 </h3>
                 <div className="space-y-4">
+                  {/* Multi-select Herd/Groups */}
                   <div>
-                    <label className="label">Herd / Group</label>
-                    <select
-                      name="herdGroupId"
-                      value={form.herdGroupId}
-                      onChange={(e) => {
-                        setForm((prev) => ({
-                          ...prev,
-                          herdGroupId: e.target.value,
-                          selectedAnimalIds: [], // Reset animal selection when group changes
-                        }));
-                      }}
-                      className="input"
-                    >
-                      <option value="">Select a herd or group...</option>
-                      {animalGroups.map((group) => (
-                        <option key={group.id || group._id} value={group.id || group._id}>
-                          {group.name} {group.animalCount ? `(${group.animalCount} animals)` : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="label">Herds / Groups (select one or more)</label>
+                    <div className="bg-white rounded border border-gray-200 max-h-40 overflow-y-auto">
+                      {animalGroups.length === 0 ? (
+                        <div className="text-sm text-gray-500 py-4 text-center">
+                          No herds or groups found
+                        </div>
+                      ) : (
+                        animalGroups.map((group) => {
+                          const groupId = group.id || group._id;
+                          const isSelected = form.herdGroupIds.includes(groupId);
+                          return (
+                            <label
+                              key={groupId}
+                              className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                                isSelected ? 'bg-primary-50' : ''
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleHerdGroupToggle(groupId)}
+                                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                              />
+                              <span className="flex-1 text-sm text-gray-700">
+                                {group.name}
+                              </span>
+                              {group.animalCount && (
+                                <span className="text-xs text-gray-400">
+                                  {group.animalCount} animals
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                    {form.herdGroupIds.length > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {form.herdGroupIds.length} group{form.herdGroupIds.length !== 1 ? 's' : ''} selected
+                      </p>
+                    )}
                   </div>
 
-                  {form.herdGroupId && (
+                  {/* Animal selection from all selected groups */}
+                  {form.herdGroupIds.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <label className="label mb-0">Select Animals</label>
@@ -448,8 +586,8 @@ export default function TaskForm() {
                           onClick={handleSelectAllAnimals}
                           className="text-sm text-primary-600 hover:text-primary-700 font-medium"
                         >
-                          {animalsInGroup.length > 0 &&
-                          form.selectedAnimalIds.length === animalsInGroup.length
+                          {animalsInGroups.length > 0 &&
+                          form.selectedAnimalIds.length === animalsInGroups.length
                             ? 'Deselect All'
                             : 'Select All'}
                         </button>
@@ -459,13 +597,13 @@ export default function TaskForm() {
                         <div className="text-sm text-gray-500 py-4 text-center">
                           Loading animals...
                         </div>
-                      ) : animalsInGroup.length === 0 ? (
+                      ) : animalsInGroups.length === 0 ? (
                         <div className="text-sm text-gray-500 py-4 text-center bg-white rounded border border-gray-200">
-                          No animals found in this group
+                          No animals found in selected groups
                         </div>
                       ) : (
                         <div className="bg-white rounded border border-gray-200 max-h-48 overflow-y-auto">
-                          {animalsInGroup.map((animal) => {
+                          {animalsInGroups.map((animal) => {
                             const animalId = animal.id || animal._id;
                             const isSelected = form.selectedAnimalIds.includes(animalId);
                             return (
@@ -484,9 +622,10 @@ export default function TaskForm() {
                                 <span className="flex-1 text-sm text-gray-700">
                                   {animal.name || animal.tagNumber || `Animal #${animalId.slice(-6)}`}
                                 </span>
-                                {animal.tagNumber && animal.name && (
-                                  <span className="text-xs text-gray-400">#{animal.tagNumber}</span>
-                                )}
+                                <span className="text-xs text-gray-400">
+                                  {animal._groupName}
+                                  {animal.tagNumber && animal.name && ` • #${animal.tagNumber}`}
+                                </span>
                               </label>
                             );
                           })}
@@ -557,36 +696,36 @@ export default function TaskForm() {
             </div>
 
             <div>
-              <label className="label">Required Equipment</label>
+              <label className="label">Tools Needed</label>
               <div className="flex gap-2 mb-2">
                 <input
                   type="text"
-                  value={equipmentInput}
-                  onChange={(e) => setEquipmentInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddEquipment())}
+                  value={toolInput}
+                  onChange={(e) => setToolInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTool())}
                   className="input flex-1"
-                  placeholder="Add equipment..."
+                  placeholder="Add a tool (e.g., Pitchfork, Bucket, Syringe)..."
                 />
                 <button
                   type="button"
-                  onClick={handleAddEquipment}
+                  onClick={handleAddTool}
                   className="btn-secondary"
                 >
                   Add
                 </button>
               </div>
-              {form.requiredEquipment.length > 0 && (
+              {form.tools.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {form.requiredEquipment.map((item, index) => (
+                  {form.tools.map((tool, index) => (
                     <span
                       key={index}
-                      className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-sm"
                     >
-                      {item}
+                      🔧 {tool}
                       <button
                         type="button"
-                        onClick={() => handleRemoveEquipment(index)}
-                        className="text-gray-400 hover:text-gray-600"
+                        onClick={() => handleRemoveTool(index)}
+                        className="text-amber-600 hover:text-amber-800"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -597,6 +736,119 @@ export default function TaskForm() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Inventory Items */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <span>📦</span> Inventory Items
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Track inventory items that will be used/consumed when this task is performed.
+          </p>
+
+          <div className="space-y-4">
+            {/* Add inventory item dropdown */}
+            <div>
+              <label className="label">Add Inventory Item</label>
+              <select
+                value=""
+                onChange={(e) => e.target.value && handleAddInventoryItem(e.target.value)}
+                className="input"
+                disabled={loadingInventory}
+              >
+                <option value="">
+                  {loadingInventory ? 'Loading inventory...' : 'Select an item to add...'}
+                </option>
+                {inventoryCatalog
+                  .filter((item) => !form.inventoryItems.some((i) => i.itemId === (item.id || item._id)))
+                  .map((item) => (
+                    <option key={item.id || item._id} value={item.id || item._id}>
+                      {item.name} ({item.category}) - {item.uom}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* List of added inventory items */}
+            {form.inventoryItems.length > 0 && (
+              <div className="space-y-3">
+                {form.inventoryItems.map((item, index) => (
+                  <div
+                    key={item.itemId}
+                    className="border border-gray-200 rounded-lg p-4 bg-gray-50"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <p className="font-medium text-gray-900">{item.itemName}</p>
+                        <p className="text-xs text-gray-500">Unit: {item.uom}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveInventoryItem(index)}
+                        className="text-gray-400 hover:text-red-500"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Quantity</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => handleInventoryItemChange(index, 'quantity', e.target.value)}
+                            className="input flex-1"
+                            placeholder="0"
+                            min="0"
+                            step="0.01"
+                          />
+                          <span className="text-sm text-gray-500">{item.uom}</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Allocation Mode</label>
+                        <select
+                          value={item.allocationMode}
+                          onChange={(e) => handleInventoryItemChange(index, 'allocationMode', e.target.value)}
+                          className="input"
+                        >
+                          <option value="TOTAL">Total (divide among animals)</option>
+                          <option value="PER_ANIMAL">Per Animal (multiply by count)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Show calculation preview if animals are selected */}
+                    {totalAnimalsSelected > 0 && item.quantity && (
+                      <div className="mt-3 p-2 bg-blue-50 rounded text-sm text-blue-700">
+                        {item.allocationMode === 'TOTAL' ? (
+                          <>
+                            <strong>{item.quantity} {item.uom}</strong> total ÷ {totalAnimalsSelected} animals = <strong>{(parseFloat(item.quantity) / totalAnimalsSelected).toFixed(2)} {item.uom}</strong> per animal
+                          </>
+                        ) : (
+                          <>
+                            <strong>{item.quantity} {item.uom}</strong> per animal × {totalAnimalsSelected} animals = <strong>{(parseFloat(item.quantity) * totalAnimalsSelected).toFixed(2)} {item.uom}</strong> total
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {form.inventoryItems.length === 0 && (
+              <div className="text-sm text-gray-500 py-4 text-center border border-dashed border-gray-300 rounded-lg">
+                No inventory items added yet
+              </div>
+            )}
           </div>
         </div>
 

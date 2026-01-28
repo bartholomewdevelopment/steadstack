@@ -12,6 +12,7 @@ const {
   BankReconciliation,
   LedgerTransaction,
   LedgerEntry,
+  JournalEntry,
 } = require('../models');
 const { verifyToken } = require('../middleware/auth');
 
@@ -618,6 +619,124 @@ router.delete('/invoices/:id', async (req, res, next) => {
   }
 });
 
+// Send/Post an invoice to the ledger
+// Dr. Accounts Receivable
+// Cr. Revenue accounts (from line items)
+router.post('/invoices/:id/send', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const invoice = await Invoice.findOne({ _id: req.params.id, tenantId }).populate('customerId');
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
+    }
+
+    if (invoice.status !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft invoices can be sent/posted',
+      });
+    }
+
+    if (invoice.ledgerTransactionId) {
+      return res.status(400).json({ success: false, message: 'Invoice has already been posted' });
+    }
+
+    // Validate all lines have accountId for posting
+    const invalidLines = invoice.lineItems.filter(line => !line.accountId);
+    if (invalidLines.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'All invoice line items must have a revenue account assigned before sending',
+      });
+    }
+
+    // Get the default A/R account
+    const arAccount = await Account.findOne({
+      tenantId,
+      isActive: true,
+      $or: [{ subtype: 'AR' }, { code: { $regex: /receivable/i } }],
+    });
+
+    if (!arAccount) {
+      return res.status(400).json({
+        success: false,
+        message: 'No Accounts Receivable account found. Please set up an A/R account first.',
+      });
+    }
+
+    // Create ledger transaction
+    const transaction = new LedgerTransaction({
+      tenantId,
+      siteId: invoice.siteId,
+      transactionDate: invoice.invoiceDate,
+      description: `Invoice: ${invoice.invoiceNumber} - ${invoice.customerId?.name || 'Customer'}`,
+      sourceType: 'INVOICE',
+      sourceId: invoice._id.toString(),
+      reference: invoice.invoiceNumber,
+      status: 'POSTED',
+      idempotencyKey: `invoice-${invoice._id.toString()}`,
+    });
+
+    await transaction.save();
+
+    const ledgerEntries = [];
+
+    // Debit A/R for the total
+    ledgerEntries.push({
+      tenantId,
+      transactionId: transaction._id,
+      accountId: arAccount._id,
+      occurredAt: invoice.invoiceDate,
+      debit: invoice.total,
+      credit: 0,
+      memo: `Invoice ${invoice.invoiceNumber} - ${invoice.customerId?.name || ''}`,
+      entityType: 'CUSTOMER',
+      entityId: invoice.customerId?._id?.toString() || invoice.customerId?.toString(),
+      idempotencyKey: `invoice-${invoice._id.toString()}-ar`,
+    });
+
+    // Credit revenue accounts for each line item
+    for (const line of invoice.lineItems) {
+      ledgerEntries.push({
+        tenantId,
+        transactionId: transaction._id,
+        accountId: line.accountId,
+        occurredAt: invoice.invoiceDate,
+        debit: 0,
+        credit: line.amount || (line.quantity * line.unitPrice),
+        memo: line.description || invoice.invoiceNumber,
+        entityType: 'CUSTOMER',
+        entityId: invoice.customerId?._id?.toString() || invoice.customerId?.toString(),
+        idempotencyKey: `invoice-${invoice._id.toString()}-line-${line._id || Math.random()}`,
+      });
+    }
+
+    await LedgerEntry.insertMany(ledgerEntries);
+
+    // Update invoice status
+    invoice.status = 'SENT';
+    invoice.ledgerTransactionId = transaction._id;
+    invoice.sentAt = new Date();
+    invoice.sentBy = req.user?.uid || req.user?.userId;
+    await invoice.save();
+
+    res.json({
+      success: true,
+      data: invoice,
+      ledgerTransactionId: transaction._id.toString(),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'This invoice has already been posted',
+      });
+    }
+    next(error);
+  }
+});
+
 // ============================================
 // BILLS
 // ============================================
@@ -726,6 +845,117 @@ router.delete('/bills/:id', async (req, res, next) => {
   }
 });
 
+// Post a bill to the ledger
+// Dr. Expense/Inventory accounts (from line items)
+// Cr. Accounts Payable
+router.post('/bills/:id/post', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const bill = await Bill.findOne({ _id: req.params.id, tenantId }).populate('vendorId');
+
+    if (!bill) {
+      return res.status(404).json({ success: false, message: 'Bill not found' });
+    }
+
+    if (bill.status === 'POSTED' || bill.ledgerTransactionId) {
+      return res.status(400).json({ success: false, message: 'Bill has already been posted' });
+    }
+
+    // Validate all lines have accountId for posting
+    const invalidLines = bill.lineItems.filter(line => !line.accountId);
+    if (invalidLines.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'All bill line items must have an expense account assigned before posting',
+      });
+    }
+
+    // Get the default A/P account (by subtype or code)
+    const apAccount = await Account.findOne({
+      tenantId,
+      isActive: true,
+      $or: [{ subtype: 'AP' }, { code: { $regex: /payable/i } }],
+    });
+
+    if (!apAccount) {
+      return res.status(400).json({
+        success: false,
+        message: 'No Accounts Payable account found. Please set up an A/P account first.',
+      });
+    }
+
+    // Create ledger transaction
+    const transaction = new LedgerTransaction({
+      tenantId,
+      siteId: bill.siteId,
+      transactionDate: bill.billDate,
+      description: `Vendor Bill: ${bill.billNumber} - ${bill.vendorId?.name || 'Unknown Vendor'}`,
+      sourceType: 'BILL',
+      sourceId: bill._id.toString(),
+      reference: bill.billNumber,
+      status: 'POSTED',
+      idempotencyKey: `bill-${bill._id.toString()}`,
+    });
+
+    await transaction.save();
+
+    // Create ledger entries - debits for expense accounts
+    const ledgerEntries = [];
+
+    for (const line of bill.lineItems) {
+      ledgerEntries.push({
+        tenantId,
+        transactionId: transaction._id,
+        accountId: line.accountId,
+        occurredAt: bill.billDate,
+        debit: line.amount || (line.quantity * line.unitPrice),
+        credit: 0,
+        memo: line.description || bill.billNumber,
+        entityType: 'VENDOR',
+        entityId: bill.vendorId?._id?.toString() || bill.vendorId?.toString(),
+        idempotencyKey: `bill-${bill._id.toString()}-line-${line._id || Math.random()}`,
+      });
+    }
+
+    // Credit A/P for the total
+    ledgerEntries.push({
+      tenantId,
+      transactionId: transaction._id,
+      accountId: apAccount._id,
+      occurredAt: bill.billDate,
+      debit: 0,
+      credit: bill.total,
+      memo: `Bill ${bill.billNumber} - ${bill.vendorId?.name || ''}`,
+      entityType: 'VENDOR',
+      entityId: bill.vendorId?._id?.toString() || bill.vendorId?.toString(),
+      idempotencyKey: `bill-${bill._id.toString()}-ap`,
+    });
+
+    await LedgerEntry.insertMany(ledgerEntries);
+
+    // Update bill status
+    bill.status = 'POSTED';
+    bill.ledgerTransactionId = transaction._id;
+    bill.postedAt = new Date();
+    bill.postedBy = req.user?.uid || req.user?.userId;
+    await bill.save();
+
+    res.json({
+      success: true,
+      data: bill,
+      ledgerTransactionId: transaction._id.toString(),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'This bill has already been posted',
+      });
+    }
+    next(error);
+  }
+});
+
 // ============================================
 // CHECKS
 // ============================================
@@ -824,6 +1054,168 @@ router.post('/checks/:id/void', async (req, res, next) => {
   }
 });
 
+// Post a check to the ledger
+// Dr. Accounts Payable (for bill payments) or Expense accounts (for direct expenses)
+// Cr. Cash/Bank account
+router.post('/checks/:id/post', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const check = await Check.findOne({ _id: req.params.id, tenantId })
+      .populate('vendorId')
+      .populate('bankAccountId');
+
+    if (!check) {
+      return res.status(404).json({ success: false, message: 'Check not found' });
+    }
+
+    if (check.status === 'POSTED' || check.ledgerTransactionId) {
+      return res.status(400).json({ success: false, message: 'Check has already been posted' });
+    }
+
+    if (check.status === 'VOID') {
+      return res.status(400).json({ success: false, message: 'Cannot post a voided check' });
+    }
+
+    if (!check.bankAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Check must have a bank account assigned',
+      });
+    }
+
+    // Get the default A/P account
+    const apAccount = await Account.findOne({
+      tenantId,
+      isActive: true,
+      $or: [{ subtype: 'AP' }, { code: { $regex: /payable/i } }],
+    });
+
+    // Create ledger transaction
+    const transaction = new LedgerTransaction({
+      tenantId,
+      siteId: check.siteId,
+      transactionDate: check.checkDate,
+      description: `Check #${check.checkNumber} - ${check.vendorId?.name || check.payee || 'Payment'}`,
+      sourceType: 'CHECK',
+      sourceId: check._id.toString(),
+      reference: check.checkNumber,
+      status: 'POSTED',
+      idempotencyKey: `check-${check._id.toString()}`,
+    });
+
+    await transaction.save();
+
+    const ledgerEntries = [];
+
+    // If this check has bill payments, debit A/P for those
+    if (check.billPayments && check.billPayments.length > 0 && apAccount) {
+      let totalBillPayments = 0;
+      for (const payment of check.billPayments) {
+        totalBillPayments += payment.amount || 0;
+
+        // Update the bill's paid amount
+        if (payment.billId) {
+          const bill = await Bill.findById(payment.billId);
+          if (bill) {
+            bill.amountPaid = (bill.amountPaid || 0) + (payment.amount || 0);
+            bill.balance = bill.total - bill.amountPaid;
+            if (bill.balance <= 0.01) {
+              bill.status = 'PAID';
+            } else if (bill.amountPaid > 0) {
+              bill.status = 'PARTIALLY_PAID';
+            }
+            await bill.save();
+          }
+        }
+      }
+
+      if (totalBillPayments > 0) {
+        ledgerEntries.push({
+          tenantId,
+          transactionId: transaction._id,
+          accountId: apAccount._id,
+          occurredAt: check.checkDate,
+          debit: totalBillPayments,
+          credit: 0,
+          memo: `Check #${check.checkNumber} - Bill Payments`,
+          entityType: 'VENDOR',
+          entityId: check.vendorId?._id?.toString(),
+          idempotencyKey: `check-${check._id.toString()}-ap`,
+        });
+      }
+    }
+
+    // If this check has expense lines (direct expenses), debit those accounts
+    if (check.expenseLines && check.expenseLines.length > 0) {
+      for (const line of check.expenseLines) {
+        if (line.accountId && line.amount > 0) {
+          ledgerEntries.push({
+            tenantId,
+            transactionId: transaction._id,
+            accountId: line.accountId,
+            occurredAt: check.checkDate,
+            debit: line.amount,
+            credit: 0,
+            memo: line.description || `Check #${check.checkNumber}`,
+            idempotencyKey: `check-${check._id.toString()}-exp-${line._id || Math.random()}`,
+          });
+        }
+      }
+    }
+
+    // If no bill payments or expense lines, debit A/P for the full amount (generic payment)
+    if (ledgerEntries.length === 0 && apAccount) {
+      ledgerEntries.push({
+        tenantId,
+        transactionId: transaction._id,
+        accountId: apAccount._id,
+        occurredAt: check.checkDate,
+        debit: check.amount,
+        credit: 0,
+        memo: `Check #${check.checkNumber} - Payment`,
+        entityType: 'VENDOR',
+        entityId: check.vendorId?._id?.toString(),
+        idempotencyKey: `check-${check._id.toString()}-ap`,
+      });
+    }
+
+    // Credit the bank account for the total check amount
+    ledgerEntries.push({
+      tenantId,
+      transactionId: transaction._id,
+      accountId: check.bankAccountId._id || check.bankAccountId,
+      occurredAt: check.checkDate,
+      debit: 0,
+      credit: check.amount,
+      memo: `Check #${check.checkNumber}`,
+      idempotencyKey: `check-${check._id.toString()}-bank`,
+    });
+
+    await LedgerEntry.insertMany(ledgerEntries);
+
+    // Update check status
+    check.status = 'POSTED';
+    check.ledgerTransactionId = transaction._id;
+    check.postedAt = new Date();
+    check.postedBy = req.user?.uid || req.user?.userId;
+    await check.save();
+
+    res.json({
+      success: true,
+      data: check,
+      ledgerTransactionId: transaction._id.toString(),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'This check has already been posted',
+      });
+    }
+    next(error);
+  }
+});
+
 // ============================================
 // RECEIPTS
 // ============================================
@@ -905,6 +1297,169 @@ router.put('/receipts/:id', async (req, res, next) => {
     }
     res.json({ success: true, data: receipt });
   } catch (error) {
+    next(error);
+  }
+});
+
+// Post a customer receipt to the ledger
+// Dr. Cash/Bank account
+// Cr. Accounts Receivable (for invoice payments) or Income accounts
+router.post('/receipts/:id/post', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const receipt = await Receipt.findOne({ _id: req.params.id, tenantId })
+      .populate('customerId')
+      .populate('depositAccountId');
+
+    if (!receipt) {
+      return res.status(404).json({ success: false, message: 'Receipt not found' });
+    }
+
+    if (receipt.status === 'POSTED' || receipt.ledgerTransactionId) {
+      return res.status(400).json({ success: false, message: 'Receipt has already been posted' });
+    }
+
+    if (!receipt.depositAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Receipt must have a deposit account assigned',
+      });
+    }
+
+    // Get the default A/R account
+    const arAccount = await Account.findOne({
+      tenantId,
+      isActive: true,
+      $or: [{ subtype: 'AR' }, { code: { $regex: /receivable/i } }],
+    });
+
+    // Create ledger transaction
+    const transaction = new LedgerTransaction({
+      tenantId,
+      siteId: receipt.siteId,
+      transactionDate: receipt.receiptDate,
+      description: `Receipt - ${receipt.customerId?.name || 'Customer Payment'}`,
+      sourceType: 'RECEIPT',
+      sourceId: receipt._id.toString(),
+      reference: receipt.referenceNumber || receipt._id.toString().slice(-6),
+      status: 'POSTED',
+      idempotencyKey: `receipt-${receipt._id.toString()}`,
+    });
+
+    await transaction.save();
+
+    const ledgerEntries = [];
+
+    // Debit the deposit/cash account for the total
+    ledgerEntries.push({
+      tenantId,
+      transactionId: transaction._id,
+      accountId: receipt.depositAccountId._id || receipt.depositAccountId,
+      occurredAt: receipt.receiptDate,
+      debit: receipt.amount,
+      credit: 0,
+      memo: `Receipt from ${receipt.customerId?.name || 'Customer'}`,
+      idempotencyKey: `receipt-${receipt._id.toString()}-cash`,
+    });
+
+    // If this receipt has invoice payments, credit A/R
+    if (receipt.invoicePayments && receipt.invoicePayments.length > 0 && arAccount) {
+      let totalInvoicePayments = 0;
+
+      for (const payment of receipt.invoicePayments) {
+        totalInvoicePayments += payment.amount || 0;
+
+        // Update the invoice's paid amount
+        if (payment.invoiceId) {
+          const invoice = await Invoice.findById(payment.invoiceId);
+          if (invoice) {
+            invoice.amountPaid = (invoice.amountPaid || 0) + (payment.amount || 0);
+            invoice.balance = invoice.total - invoice.amountPaid;
+            if (invoice.balance <= 0.01) {
+              invoice.status = 'PAID';
+            } else if (invoice.amountPaid > 0) {
+              invoice.status = 'PARTIAL';
+            }
+            await invoice.save();
+          }
+        }
+      }
+
+      if (totalInvoicePayments > 0) {
+        ledgerEntries.push({
+          tenantId,
+          transactionId: transaction._id,
+          accountId: arAccount._id,
+          occurredAt: receipt.receiptDate,
+          debit: 0,
+          credit: totalInvoicePayments,
+          memo: `Receipt - Invoice Payments`,
+          entityType: 'CUSTOMER',
+          entityId: receipt.customerId?._id?.toString(),
+          idempotencyKey: `receipt-${receipt._id.toString()}-ar`,
+        });
+      }
+
+      // If there's a difference, it might be income (overpayment, etc.)
+      const difference = receipt.amount - totalInvoicePayments;
+      if (difference > 0.01) {
+        // Get a default income account or use A/R as fallback
+        const incomeAccount = await Account.findOne({
+          tenantId,
+          isActive: true,
+          type: 'INCOME',
+        });
+
+        if (incomeAccount) {
+          ledgerEntries.push({
+            tenantId,
+            transactionId: transaction._id,
+            accountId: incomeAccount._id,
+            occurredAt: receipt.receiptDate,
+            debit: 0,
+            credit: difference,
+            memo: `Receipt - Other Income`,
+            idempotencyKey: `receipt-${receipt._id.toString()}-income`,
+          });
+        }
+      }
+    } else if (arAccount) {
+      // No invoice payments specified, credit A/R for the full amount
+      ledgerEntries.push({
+        tenantId,
+        transactionId: transaction._id,
+        accountId: arAccount._id,
+        occurredAt: receipt.receiptDate,
+        debit: 0,
+        credit: receipt.amount,
+        memo: `Receipt from ${receipt.customerId?.name || 'Customer'}`,
+        entityType: 'CUSTOMER',
+        entityId: receipt.customerId?._id?.toString(),
+        idempotencyKey: `receipt-${receipt._id.toString()}-ar`,
+      });
+    }
+
+    await LedgerEntry.insertMany(ledgerEntries);
+
+    // Update receipt status
+    receipt.status = 'POSTED';
+    receipt.ledgerTransactionId = transaction._id;
+    receipt.postedAt = new Date();
+    receipt.postedBy = req.user?.uid || req.user?.userId;
+    await receipt.save();
+
+    res.json({
+      success: true,
+      data: receipt,
+      ledgerTransactionId: transaction._id.toString(),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'This receipt has already been posted',
+      });
+    }
     next(error);
   }
 });
@@ -1397,6 +1952,456 @@ router.get('/transactions', async (req, res, next) => {
       success: true,
       data: entries,
       pagination: { total, limit: parseInt(limit), offset: parseInt(offset) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================
+// JOURNAL ENTRIES (Manual Entries)
+// ============================================
+
+// Get next journal entry number
+const getNextJournalEntryNumber = async (tenantId) => {
+  const lastEntry = await JournalEntry.findOne({ tenantId })
+    .sort({ entryNumber: -1 })
+    .select('entryNumber');
+
+  if (!lastEntry) {
+    return 'JE-00001';
+  }
+
+  const lastNum = parseInt(lastEntry.entryNumber.replace('JE-', ''), 10);
+  return `JE-${String(lastNum + 1).padStart(5, '0')}`;
+};
+
+// List journal entries
+router.get('/journal-entries', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { status, startDate, endDate, limit = 50, offset = 0 } = req.query;
+
+    const filter = { tenantId };
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.entryDate = {};
+      if (startDate) filter.entryDate.$gte = new Date(startDate);
+      if (endDate) filter.entryDate.$lte = new Date(endDate);
+    }
+
+    const entries = await JournalEntry.find(filter)
+      .sort({ entryDate: -1, entryNumber: -1 })
+      .skip(parseInt(offset))
+      .limit(parseInt(limit));
+
+    const total = await JournalEntry.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: entries,
+      pagination: { total, limit: parseInt(limit), offset: parseInt(offset) },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single journal entry
+router.get('/journal-entries/:id', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const entry = await JournalEntry.findOne({ _id: req.params.id, tenantId })
+      .populate('lines.accountId', 'code name type');
+
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Journal entry not found' });
+    }
+
+    res.json({ success: true, data: entry });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create journal entry (draft)
+router.post('/journal-entries', [
+  body('entryDate').optional().isISO8601(),
+  body('lines').isArray({ min: 2 }).withMessage('At least 2 lines required'),
+  body('lines.*.accountId').notEmpty().withMessage('Account ID is required'),
+], validate, async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const siteId = getSiteId(req);
+
+    // Get next entry number
+    const entryNumber = await getNextJournalEntryNumber(tenantId);
+
+    // Denormalize account info on lines
+    const lines = [];
+    for (let i = 0; i < req.body.lines.length; i++) {
+      const line = req.body.lines[i];
+      const account = await Account.findById(line.accountId);
+      if (!account) {
+        return res.status(400).json({
+          success: false,
+          message: `Account not found for line ${i + 1}`,
+        });
+      }
+
+      lines.push({
+        lineNumber: i + 1,
+        accountId: line.accountId,
+        accountCode: account.code,
+        accountName: account.name,
+        description: line.description || '',
+        debit: parseFloat(line.debit) || 0,
+        credit: parseFloat(line.credit) || 0,
+        entityType: line.entityType,
+        entityId: line.entityId,
+      });
+    }
+
+    const entry = new JournalEntry({
+      tenantId,
+      siteId,
+      entryNumber,
+      entryDate: req.body.entryDate || new Date(),
+      reference: req.body.reference,
+      memo: req.body.memo,
+      lines,
+      status: 'DRAFT',
+      createdBy: req.user?.uid || req.user?.userId,
+    });
+
+    await entry.save();
+
+    res.status(201).json({ success: true, data: entry });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update journal entry (draft only)
+router.put('/journal-entries/:id', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const entry = await JournalEntry.findOne({ _id: req.params.id, tenantId });
+
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Journal entry not found' });
+    }
+
+    if (entry.status !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft entries can be updated',
+      });
+    }
+
+    // Update allowed fields
+    if (req.body.entryDate) entry.entryDate = new Date(req.body.entryDate);
+    if (req.body.reference !== undefined) entry.reference = req.body.reference;
+    if (req.body.memo !== undefined) entry.memo = req.body.memo;
+
+    // Update lines if provided
+    if (req.body.lines && Array.isArray(req.body.lines)) {
+      const lines = [];
+      for (let i = 0; i < req.body.lines.length; i++) {
+        const line = req.body.lines[i];
+        const account = await Account.findById(line.accountId);
+        if (!account) {
+          return res.status(400).json({
+            success: false,
+            message: `Account not found for line ${i + 1}`,
+          });
+        }
+
+        lines.push({
+          lineNumber: i + 1,
+          accountId: line.accountId,
+          accountCode: account.code,
+          accountName: account.name,
+          description: line.description || '',
+          debit: parseFloat(line.debit) || 0,
+          credit: parseFloat(line.credit) || 0,
+          entityType: line.entityType,
+          entityId: line.entityId,
+        });
+      }
+      entry.lines = lines;
+    }
+
+    await entry.save();
+
+    res.json({ success: true, data: entry });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete journal entry (draft only)
+router.delete('/journal-entries/:id', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const entry = await JournalEntry.findOne({ _id: req.params.id, tenantId });
+
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Journal entry not found' });
+    }
+
+    if (entry.status !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft entries can be deleted',
+      });
+    }
+
+    await entry.deleteOne();
+
+    res.json({ success: true, message: 'Journal entry deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Post journal entry to ledger
+router.post('/journal-entries/:id/post', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const entry = await JournalEntry.findOne({ _id: req.params.id, tenantId });
+
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Journal entry not found' });
+    }
+
+    if (entry.status !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft entries can be posted',
+      });
+    }
+
+    if (!entry.isBalanced) {
+      return res.status(400).json({
+        success: false,
+        message: `Entry is not balanced. Debits: ${entry.totalDebits}, Credits: ${entry.totalCredits}`,
+      });
+    }
+
+    // Create ledger transaction
+    const transaction = new LedgerTransaction({
+      tenantId,
+      siteId: entry.siteId,
+      transactionDate: entry.entryDate,
+      description: entry.memo || `Journal Entry ${entry.entryNumber}`,
+      sourceType: 'JOURNAL_ENTRY',
+      sourceId: entry._id.toString(),
+      reference: entry.reference,
+      status: 'POSTED',
+      idempotencyKey: `je-${entry._id.toString()}`,
+    });
+
+    await transaction.save();
+
+    // Create ledger entries
+    const ledgerEntries = entry.lines.map((line) => ({
+      tenantId,
+      transactionId: transaction._id,
+      accountId: line.accountId,
+      occurredAt: entry.entryDate,
+      debit: line.debit,
+      credit: line.credit,
+      memo: line.description,
+      entityType: line.entityType,
+      entityId: line.entityId,
+      idempotencyKey: `je-${entry._id.toString()}-${line.lineNumber}`,
+    }));
+
+    await LedgerEntry.insertMany(ledgerEntries);
+
+    // Update journal entry status
+    entry.status = 'POSTED';
+    entry.ledgerTransactionId = transaction._id;
+    entry.postedAt = new Date();
+    entry.postedBy = req.user?.uid || req.user?.userId;
+    await entry.save();
+
+    res.json({
+      success: true,
+      data: entry,
+      ledgerTransactionId: transaction._id.toString(),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'This entry has already been posted',
+      });
+    }
+    next(error);
+  }
+});
+
+// Reverse a posted journal entry
+router.post('/journal-entries/:id/reverse', [
+  body('reason').optional().isString(),
+], validate, async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+    const entry = await JournalEntry.findOne({ _id: req.params.id, tenantId });
+
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Journal entry not found' });
+    }
+
+    if (entry.status !== 'POSTED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only posted entries can be reversed',
+      });
+    }
+
+    if (entry.reversedByEntryId) {
+      return res.status(400).json({
+        success: false,
+        message: 'This entry has already been reversed',
+      });
+    }
+
+    // Create reversing entry with swapped debits/credits
+    const reversingEntryNumber = await getNextJournalEntryNumber(tenantId);
+    const reversingLines = entry.lines.map((line, idx) => ({
+      lineNumber: idx + 1,
+      accountId: line.accountId,
+      accountCode: line.accountCode,
+      accountName: line.accountName,
+      description: `Reversal: ${line.description || ''}`.trim(),
+      debit: line.credit, // Swap debit and credit
+      credit: line.debit,
+      entityType: line.entityType,
+      entityId: line.entityId,
+    }));
+
+    const reversingEntry = new JournalEntry({
+      tenantId,
+      siteId: entry.siteId,
+      entryNumber: reversingEntryNumber,
+      entryDate: new Date(),
+      reference: `REV-${entry.entryNumber}`,
+      memo: `Reversal of ${entry.entryNumber}${req.body.reason ? ': ' + req.body.reason : ''}`,
+      lines: reversingLines,
+      status: 'DRAFT',
+      reversesEntryId: entry._id,
+      reversalReason: req.body.reason,
+      createdBy: req.user?.uid || req.user?.userId,
+    });
+
+    await reversingEntry.save();
+
+    // Post the reversing entry immediately
+    const transaction = new LedgerTransaction({
+      tenantId,
+      siteId: entry.siteId,
+      transactionDate: reversingEntry.entryDate,
+      description: reversingEntry.memo,
+      sourceType: 'JOURNAL_ENTRY',
+      sourceId: reversingEntry._id.toString(),
+      reference: reversingEntry.reference,
+      status: 'POSTED',
+      reversesTransactionId: entry.ledgerTransactionId,
+      idempotencyKey: `je-${reversingEntry._id.toString()}`,
+    });
+
+    await transaction.save();
+
+    const ledgerEntries = reversingEntry.lines.map((line) => ({
+      tenantId,
+      transactionId: transaction._id,
+      accountId: line.accountId,
+      occurredAt: reversingEntry.entryDate,
+      debit: line.debit,
+      credit: line.credit,
+      memo: line.description,
+      entityType: line.entityType,
+      entityId: line.entityId,
+      idempotencyKey: `je-${reversingEntry._id.toString()}-${line.lineNumber}`,
+    }));
+
+    await LedgerEntry.insertMany(ledgerEntries);
+
+    // Update reversing entry status
+    reversingEntry.status = 'POSTED';
+    reversingEntry.ledgerTransactionId = transaction._id;
+    reversingEntry.postedAt = new Date();
+    reversingEntry.postedBy = req.user?.uid || req.user?.userId;
+    await reversingEntry.save();
+
+    // Update original entry
+    entry.status = 'REVERSED';
+    entry.reversedByEntryId = reversingEntry._id;
+    entry.reversedAt = new Date();
+    entry.reversedBy = req.user?.uid || req.user?.userId;
+    await entry.save();
+
+    // Update original transaction
+    await LedgerTransaction.findByIdAndUpdate(entry.ledgerTransactionId, {
+      status: 'REVERSED',
+      reversedByTransactionId: transaction._id,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        originalEntry: entry,
+        reversingEntry: reversingEntry,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================
+// ACCOUNTING SETTINGS
+// ============================================
+
+// Get accounting settings for tenant
+router.get('/settings', async (req, res, next) => {
+  try {
+    const tenantId = getTenantId(req);
+
+    // For now, store settings in a simple structure
+    // In future, could be a separate collection
+    const settings = await Account.aggregate([
+      { $match: { tenantId, isActive: true } },
+      { $group: {
+        _id: null,
+        accounts: { $push: { id: '$_id', code: '$code', name: '$name', type: '$type', subtype: '$subtype' } }
+      }}
+    ]);
+
+    // Find default accounts by subtype
+    const accounts = settings[0]?.accounts || [];
+    const apAccount = accounts.find(a => a.subtype === 'AP');
+    const arAccount = accounts.find(a => a.subtype === 'AR');
+    const cashAccount = accounts.find(a => a.subtype === 'CASH' || a.subtype === 'BANK');
+
+    res.json({
+      success: true,
+      data: {
+        defaultAPAccountId: apAccount?.id?.toString() || null,
+        defaultARAccountId: arAccount?.id?.toString() || null,
+        defaultCashAccountId: cashAccount?.id?.toString() || null,
+        // Return available accounts for selection
+        availableAccounts: {
+          ap: accounts.filter(a => a.type === 'LIABILITY'),
+          ar: accounts.filter(a => a.type === 'ASSET'),
+          cash: accounts.filter(a => a.subtype === 'CASH' || a.subtype === 'BANK'),
+          revenue: accounts.filter(a => a.type === 'INCOME'),
+          expense: accounts.filter(a => a.type === 'EXPENSE' || a.type === 'COGS'),
+        }
+      },
     });
   } catch (error) {
     next(error);

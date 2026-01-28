@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { inventoryApi } from '../../../services/api';
+import { inventoryApi, binsApi } from '../../../services/api';
 
 const categoryIcons = {
   FEED: '🌾',
@@ -20,6 +20,7 @@ export default function InventoryDetail() {
   const [item, setItem] = useState(null);
   const [siteInventory, setSiteInventory] = useState([]);
   const [movements, setMovements] = useState([]);
+  const [bin, setBin] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -36,9 +37,23 @@ export default function InventoryDetail() {
         inventoryApi.getMovements({ itemId: id, limit: 20 }),
       ]);
 
-      setItem(itemRes.data?.item || itemRes.item);
+      const itemData = itemRes.data?.item || itemRes.item;
+      setItem(itemData);
       setSiteInventory(itemRes.data?.siteInventory || itemRes.siteInventory || []);
       setMovements(movementsRes.data?.movements || movementsRes.movements || []);
+
+      // Fetch bin if item has binId
+      if (itemData?.binId) {
+        try {
+          const binRes = await binsApi.get(itemData.binId);
+          setBin(binRes.data?.bin || null);
+        } catch (err) {
+          console.error('Error fetching bin:', err);
+          setBin(null);
+        }
+      } else {
+        setBin(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -317,6 +332,29 @@ export default function InventoryDetail() {
               )}
             </dl>
           </div>
+
+          {/* Storage Location */}
+          {bin && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="font-semibold text-gray-900 mb-4">Storage Location</h3>
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-mono text-sm bg-gray-200 px-2 py-0.5 rounded inline-block">
+                    {bin.code}
+                  </p>
+                  <p className="text-sm text-gray-900 mt-0.5">{bin.name}</p>
+                  {bin.type && (
+                    <p className="text-xs text-gray-500">{bin.type}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Reorder Info */}
           {(item.reorderPoint > 0 || item.preferredVendor) && (

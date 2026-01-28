@@ -9,3 +9,6 @@ export { default as BankDeposit } from './BankDeposit';
 export { default as BankReconciliation } from './BankReconciliation';
 export { default as AccountAnalysis } from './AccountAnalysis';
 export { default as Inquiry } from './Inquiry';
+export { default as JournalEntries } from './JournalEntries';
+export { default as JournalEntryForm } from './JournalEntryForm';
+export { default as JournalEntryDetail } from './JournalEntryDetail';

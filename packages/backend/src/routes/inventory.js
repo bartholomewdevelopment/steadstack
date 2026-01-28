@@ -94,6 +94,54 @@ router.get('/items', async (req, res) => {
 });
 
 /**
+ * GET /api/inventory/totals
+ * Get inventory totals (item count, total qty, total value)
+ */
+router.get('/totals', async (req, res) => {
+  try {
+    const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+    if (!userData) {
+      return res.status(403).json({ success: false, message: 'User not found' });
+    }
+
+    const { tenantId } = userData;
+
+    // Get all active inventory items
+    const items = await firestoreService.getInventoryItems(tenantId, { activeOnly: true });
+    const itemCount = items.length;
+
+    // Get all sites for the tenant
+    const sites = await firestoreService.getSites(tenantId);
+
+    // Calculate totals across all sites
+    let totalQty = 0;
+    let totalValue = 0;
+
+    for (const item of items) {
+      for (const site of sites) {
+        const balance = await firestoreService.getSiteInventoryBalance(tenantId, site.id, item.id);
+        if (balance.qtyOnHand > 0) {
+          totalQty += balance.qtyOnHand;
+          totalValue += balance.qtyOnHand * (balance.avgCostPerUnit || 0);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        itemCount,
+        totalQty,
+        totalValue,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching inventory totals:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch inventory totals' });
+  }
+});
+
+/**
  * GET /api/inventory/items/:id
  * Get a single inventory item
  */

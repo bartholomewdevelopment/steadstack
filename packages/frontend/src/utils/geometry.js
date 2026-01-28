@@ -187,13 +187,30 @@ export function getGeoJSONBounds(geoJSON) {
 /**
  * Format acres for display
  * @param {number} acres - Acreage value
+ * @param {boolean} includeSqFt - Include square feet in parentheses (default: true)
  * @returns {string} Formatted string
  */
-export function formatAcres(acres) {
+export function formatAcres(acres, includeSqFt = true) {
   if (acres === null || acres === undefined) return '—';
-  if (acres < 1) return `${(acres * 43560).toFixed(0)} sq ft`;
-  if (acres < 10) return `${acres.toFixed(2)} acres`;
-  return `${acres.toFixed(1)} acres`;
+
+  const sqFt = Math.round(acres * 43560);
+  const formattedSqFt = sqFt.toLocaleString();
+
+  let acreStr;
+  if (acres < 0.01) {
+    acreStr = acres.toFixed(4);
+  } else if (acres < 1) {
+    acreStr = acres.toFixed(3);
+  } else if (acres < 10) {
+    acreStr = acres.toFixed(2);
+  } else {
+    acreStr = acres.toFixed(1);
+  }
+
+  if (includeSqFt) {
+    return `${acreStr} acres (${formattedSqFt} sq ft)`;
+  }
+  return `${acreStr} acres`;
 }
 
 /**

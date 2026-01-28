@@ -16,6 +16,7 @@ export default function PurchaseOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [po, setPO] = useState(null);
+  const [vendor, setVendor] = useState(null);
   const [receipts, setReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -36,9 +37,10 @@ export default function PurchaseOrderDetail() {
       setLoading(true);
       const [poRes, receiptsRes] = await Promise.all([
         purchasingApi.getPurchaseOrder(id),
-        purchasingApi.getReceipts({ purchaseOrderId: id }),
+        purchasingApi.getReceipts({ poId: id }),
       ]);
       setPO(poRes.data?.purchaseOrder);
+      setVendor(poRes.data?.vendor);
       setReceipts(receiptsRes.data?.receipts || []);
     } catch (err) {
       setError(err.message);
@@ -258,7 +260,7 @@ export default function PurchaseOrderDetail() {
       <div className="grid md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-sm text-gray-500">Vendor</p>
-          <p className="text-lg font-medium text-gray-900">{po.vendorId?.name || 'Unknown'}</p>
+          <p className="text-lg font-medium text-gray-900">{vendor?.name || 'Unknown'}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-sm text-gray-500">Order Date</p>

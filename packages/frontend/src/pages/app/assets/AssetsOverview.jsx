@@ -2,23 +2,26 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useSite } from '../../../contexts/SiteContext';
 import { AssetStatusBadge } from '../../../components/assets';
-import { assetsApi } from '../../../services/api';
+import { assetsApi, structuresApi, areasApi, binsApi, inventoryApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
 
 const assetTypes = [
   { type: 'ANIMAL', icon: '🐄', label: 'Livestock', path: '/app/assets/animals', color: 'bg-green-50 border-green-200' },
   { type: 'LAND', icon: '🏞️', label: 'Land', path: '/app/assets/land', color: 'bg-blue-50 border-blue-200' },
-  { type: 'BUILDING', icon: '🏚️', label: 'Buildings', path: '/app/assets/buildings', color: 'bg-amber-50 border-amber-200' },
+  { type: 'STRUCTURE', icon: '🏛️', label: 'Structures', path: '/app/assets/structures', color: 'bg-amber-50 border-amber-200' },
+  { type: 'AREA', icon: '📍', label: 'Areas', path: '/app/assets/structures', color: 'bg-yellow-50 border-yellow-200' },
+  { type: 'BIN', icon: '📦', label: 'Storage Bins', path: '/app/assets/structures', color: 'bg-indigo-50 border-indigo-200' },
   { type: 'VEHICLE', icon: '🚜', label: 'Vehicles', path: '/app/assets/vehicles', color: 'bg-purple-50 border-purple-200' },
   { type: 'EQUIPMENT', icon: '⚙️', label: 'Equipment', path: '/app/assets/equipment', color: 'bg-orange-50 border-orange-200' },
   { type: 'INFRASTRUCTURE', icon: '🚰', label: 'Infrastructure', path: '/app/assets/infrastructure', color: 'bg-cyan-50 border-cyan-200' },
   { type: 'TOOL', icon: '🔧', label: 'Tools', path: '/app/assets/tools', color: 'bg-gray-50 border-gray-200' },
-  { type: 'OTHER', icon: '📦', label: 'Other', path: '/app/assets/other', color: 'bg-slate-50 border-slate-200' },
+  { type: 'OTHER', icon: '📋', label: 'Other', path: '/app/assets/other', color: 'bg-slate-50 border-slate-200' },
 ];
 
 export default function AssetsOverview() {
   const { currentSite } = useSite();
   const [counts, setCounts] = useState({});
+  const [inventoryTotals, setInventoryTotals] = useState({ itemCount: 0, totalQty: 0, totalValue: 0 });
   const [recentAssets, setRecentAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,12 +40,41 @@ export default function AssetsOverview() {
 
       const params = currentSite?.id ? { siteId: currentSite.id } : {};
 
-      const [countsRes, recentRes] = await Promise.all([
+      // Fetch all counts in parallel
+      const [countsRes, recentRes, structuresRes, areasRes, binsRes, inventoryRes] = await Promise.all([
         assetsApi.getCounts(params),
         assetsApi.getRecent({ ...params, limit: 5 }),
+        structuresApi.list(),
+        areasApi.list(),
+        binsApi.list(),
+        inventoryApi.getTotals(),
       ]);
 
-      setCounts(countsRes.data?.counts || countsRes.counts || {});
+      // Get base counts from assets API
+      const baseCounts = countsRes.data?.counts || countsRes.counts || {};
+
+      // Get structures, areas, bins from their respective APIs
+      const structures = structuresRes.data?.structures || [];
+      const areas = areasRes.data?.areas || [];
+      const bins = binsRes.data?.bins || [];
+
+      // Get inventory totals
+      const invData = inventoryRes.data || inventoryRes || {};
+      setInventoryTotals({
+        itemCount: invData.itemCount || 0,
+        totalQty: invData.totalQty || 0,
+        totalValue: invData.totalValue || 0,
+      });
+
+      // Merge counts with structures, areas, bins
+      const mergedCounts = {
+        ...baseCounts,
+        STRUCTURE: { total: structures.length, active: structures.length, inactive: 0 },
+        AREA: { total: areas.length, active: areas.length, inactive: 0 },
+        BIN: { total: bins.length, active: bins.length, inactive: 0 },
+      };
+
+      setCounts(mergedCounts);
       setRecentAssets(recentRes.data?.assets || recentRes.assets || []);
     } catch (err) {
       setError(err.message);
@@ -75,7 +107,7 @@ export default function AssetsOverview() {
       ANIMAL: '/app/assets/animals',
       VEHICLE: '/app/assets/vehicles',
       LAND: '/app/assets/land',
-      BUILDING: '/app/assets/buildings',
+      STRUCTURE: '/app/assets/land/structures',
       EQUIPMENT: '/app/assets/equipment',
       INFRASTRUCTURE: '/app/assets/infrastructure',
       TOOL: '/app/assets/tools',
@@ -96,6 +128,19 @@ export default function AssetsOverview() {
     }
     if (isNaN(date.getTime())) return '-';
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount || 0);
+  };
+
+  const formatNumber = (num) => {
+    return new Intl.NumberFormat('en-US').format(num || 0);
   };
 
   return (
@@ -219,6 +264,24 @@ export default function AssetsOverview() {
               );
             })}
           </div>
+
+          {/* Inventory Tile */}
+          <Link
+            to="/app/inventory"
+            className="block p-4 rounded-xl border bg-red-50 border-red-200 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-3xl mb-2">🧺</div>
+                <h3 className="font-semibold text-gray-900">Inventory</h3>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{inventoryTotals.itemCount} items</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600">{formatNumber(inventoryTotals.totalQty)} units</p>
+                <p className="text-sm text-gray-600">{formatCurrency(inventoryTotals.totalValue)} value</p>
+              </div>
+            </div>
+          </Link>
 
           {/* Recently Updated */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

@@ -4,7 +4,7 @@ const navItems = [
   { path: '/app/assets', label: 'Overview', end: true },
   { path: '/app/assets/animals', label: 'Livestock' },
   { path: '/app/assets/land', label: 'Land' },
-  { path: '/app/assets/buildings', label: 'Buildings' },
+  { path: '/app/assets/structures', label: 'Structures' },
   { path: '/app/assets/vehicles', label: 'Vehicles' },
   { path: '/app/assets/equipment', label: 'Equipment' },
   { path: '/app/assets/infrastructure', label: 'Infrastructure' },

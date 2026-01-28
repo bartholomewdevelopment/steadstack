@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { inventoryApi, contactsApi } from '../../../services/api';
+import { inventoryApi, contactsApi, binsApi, structuresApi } from '../../../services/api';
 
 export default function InventoryForm() {
   const { id } = useParams();
@@ -13,6 +13,8 @@ export default function InventoryForm() {
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [structures, setStructures] = useState([]);
+  const [bins, setBins] = useState([]);
 
   const [form, setForm] = useState({
     name: '',
@@ -25,6 +27,7 @@ export default function InventoryForm() {
     reorderPoint: '',
     reorderQuantity: '',
     preferredVendor: '',
+    binId: '',
     notes: '',
   });
 
@@ -37,16 +40,20 @@ export default function InventoryForm() {
 
   const fetchOptions = async () => {
     try {
-      const [categoriesRes, unitsRes, vendorsRes] = await Promise.all([
+      const [categoriesRes, unitsRes, vendorsRes, structuresRes, binsRes] = await Promise.all([
         inventoryApi.getCategories(),
         inventoryApi.getUnits(),
         contactsApi.list({ type: 'vendor', activeOnly: 'true' }),
+        structuresApi.list(),
+        binsApi.list(),
       ]);
       setCategories(categoriesRes.data?.categories || categoriesRes.categories || []);
       setUnits(unitsRes.data?.units || unitsRes.units || []);
       // Sort vendors alphabetically
       const vendorContacts = vendorsRes.data?.contacts || [];
       setVendors(vendorContacts.sort((a, b) => a.name.localeCompare(b.name)));
+      setStructures(structuresRes.data?.structures || []);
+      setBins(binsRes.data?.bins || []);
     } catch (err) {
       console.error('Error fetching options:', err);
     }
@@ -70,6 +77,7 @@ export default function InventoryForm() {
         reorderPoint: item.reorderPoint || '',
         reorderQuantity: item.reorderQty || item.reorderQuantity || '',
         preferredVendor: item.preferredVendor || '',
+        binId: item.binId || '',
         notes: item.notes || '',
       });
     } catch (err) {
@@ -109,6 +117,7 @@ export default function InventoryForm() {
         reorderPoint: form.reorderPoint ? parseInt(form.reorderPoint) : 0,
         reorderQty: form.reorderQuantity ? parseInt(form.reorderQuantity) : 0,
         preferredVendor: form.preferredVendor || undefined,
+        binId: form.binId || null,
         notes: form.notes || undefined,
       };
 
@@ -351,6 +360,37 @@ export default function InventoryForm() {
               ))}
             </select>
             <p className="mt-1 text-xs text-gray-500">Will auto-fill in requisitions</p>
+          </div>
+        </div>
+
+        {/* Storage Location */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Storage Location</h2>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Default Storage Bin</label>
+            <select
+              name="binId"
+              value={form.binId}
+              onChange={handleChange}
+              className="input"
+            >
+              <option value="">-- No assigned bin --</option>
+              {structures.map((structure) => {
+                const structureBins = bins.filter(b => b.structureId === structure.id);
+                if (structureBins.length === 0) return null;
+                return (
+                  <optgroup key={structure.id} label={structure.name}>
+                    {structureBins.map((bin) => (
+                      <option key={bin.id} value={bin.id}>
+                        {bin.code} - {bin.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Where this item is typically stored</p>
           </div>
         </div>
 

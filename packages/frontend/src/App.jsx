@@ -46,6 +46,9 @@ import {
   BankReconciliation,
   AccountAnalysis,
   Inquiry,
+  JournalEntries,
+  JournalEntryForm,
+  JournalEntryDetail,
 } from './pages/app/accounting';
 import {
   RequisitionsList,
@@ -75,7 +78,6 @@ import {
   VehiclesList,
   VehicleForm,
   VehicleDetail,
-  BuildingsPlaceholder,
   EquipmentPlaceholder,
   InfrastructurePlaceholder,
   ToolsPlaceholder,
@@ -89,6 +91,8 @@ import {
   LandTractsList,
   LandTractForm,
   LandTractDetail,
+  StructuresList,
+  StructureDetail,
 } from './pages/app/assets/land';
 
 function App() {
@@ -143,7 +147,9 @@ function App() {
           <Route path="land/tracts/new" element={<LandTractForm />} />
           <Route path="land/tracts/:tractId" element={<LandTractDetail />} />
           <Route path="land/tracts/:tractId/edit" element={<LandTractForm />} />
-          <Route path="buildings" element={<BuildingsPlaceholder />} />
+          <Route path="land/structures/:structureId" element={<StructureDetail />} />
+          <Route path="structures" element={<StructuresList />} />
+          <Route path="buildings" element={<Navigate to="/app/assets/structures" replace />} />
           <Route path="equipment" element={<EquipmentPlaceholder />} />
           <Route path="infrastructure" element={<InfrastructurePlaceholder />} />
           <Route path="tools" element={<ToolsPlaceholder />} />
@@ -182,6 +188,10 @@ function App() {
         <Route path="accounting/reconciliation" element={<BankReconciliation />} />
         <Route path="accounting/analysis" element={<AccountAnalysis />} />
         <Route path="accounting/inquiry" element={<Inquiry />} />
+        <Route path="accounting/journal-entries" element={<JournalEntries />} />
+        <Route path="accounting/journal-entries/new" element={<JournalEntryForm />} />
+        <Route path="accounting/journal-entries/:id" element={<JournalEntryDetail />} />
+        <Route path="accounting/journal-entries/:id/edit" element={<JournalEntryForm />} />
         {/* Purchasing Module (P2P) */}
         <Route path="purchasing" element={<RequisitionsList />} />
         <Route path="purchasing/requisitions" element={<RequisitionsList />} />

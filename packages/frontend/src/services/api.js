@@ -115,6 +115,9 @@ export const inventoryApi = {
   approveRequisition: (id) => api.post(`/inventory/requisitions/${id}/approve`),
   rejectRequisition: (id, reason) => api.post(`/inventory/requisitions/${id}/reject`, { reason }),
 
+  // Totals/stats
+  getTotals: () => api.get('/inventory/totals'),
+
   // Metadata
   getCategories: () => api.get('/inventory/categories'),
   getMovementTypes: () => api.get('/inventory/movement-types'),
@@ -140,6 +143,39 @@ export const landTractsApi = {
   update: (id, data) => api.patch(`/land-tracts/${id}`, data),
   updateStatus: (id, data) => api.post(`/land-tracts/${id}/status`, data),
   getStats: (params) => api.get('/land-tracts/stats', params),
+};
+
+// Structures API
+export const structuresApi = {
+  list: (params) => api.get('/structures', params),
+  get: (id) => api.get(`/structures/${id}`),
+  create: (data) => api.post('/structures', data),
+  update: (id, data) => api.patch(`/structures/${id}`, data),
+  delete: (id) => api.delete(`/structures/${id}`),
+  // Areas nested under structures
+  listAreas: (structureId, params) => api.get(`/structures/${structureId}/areas`, params),
+  createArea: (structureId, data) => api.post(`/structures/${structureId}/areas`, data),
+};
+
+// Areas API (standalone endpoints)
+export const areasApi = {
+  list: (params) => api.get('/areas', params),
+  get: (id) => api.get(`/areas/${id}`),
+  update: (id, data) => api.patch(`/areas/${id}`, data),
+  delete: (id) => api.delete(`/areas/${id}`),
+};
+
+// Bins API
+export const binsApi = {
+  list: (params) => api.get('/bins', params),
+  get: (id) => api.get(`/bins/${id}`),
+  update: (id, data) => api.patch(`/bins/${id}`, data),
+  delete: (id) => api.delete(`/bins/${id}`),
+  getTypes: () => api.get('/bins/types'),
+  checkCode: (params) => api.get('/bins/check-code', params),
+  // Bins nested under structures
+  listByStructure: (structureId, params) => api.get(`/structures/${structureId}/bins`, params),
+  create: (structureId, data) => api.post(`/structures/${structureId}/bins`, data),
 };
 
 // Animals API
@@ -251,6 +287,7 @@ export const accountingApi = {
   createInvoice: (data) => api.post('/accounting/invoices', data),
   updateInvoice: (id, data) => api.put(`/accounting/invoices/${id}`, data),
   deleteInvoice: (id) => api.delete(`/accounting/invoices/${id}`),
+  sendInvoice: (id) => api.post(`/accounting/invoices/${id}/send`),
 
   // A/R Aging
   getARaging: () => api.get('/accounting/ar/aging'),
@@ -268,6 +305,7 @@ export const accountingApi = {
   createBill: (data) => api.post('/accounting/bills', data),
   updateBill: (id, data) => api.put(`/accounting/bills/${id}`, data),
   deleteBill: (id) => api.delete(`/accounting/bills/${id}`),
+  postBill: (id) => api.post(`/accounting/bills/${id}/post`),
 
   // A/P Aging
   getAPaging: () => api.get('/accounting/ap/aging'),
@@ -278,12 +316,14 @@ export const accountingApi = {
   writeCheck: (data) => api.post('/accounting/checks', data),
   updateCheck: (id, data) => api.put(`/accounting/checks/${id}`, data),
   voidCheck: (id) => api.post(`/accounting/checks/${id}/void`),
+  postCheck: (id) => api.post(`/accounting/checks/${id}/post`),
 
   // Receipts
   getReceipts: (params) => api.get('/accounting/receipts', params),
   getReceipt: (id) => api.get(`/accounting/receipts/${id}`),
   createReceipt: (data) => api.post('/accounting/receipts', data),
   updateReceipt: (id, data) => api.put(`/accounting/receipts/${id}`, data),
+  postReceipt: (id) => api.post(`/accounting/receipts/${id}/post`),
 
   // Bank Accounts (filter accounts by type=BANK)
   getBankAccounts: () => api.get('/accounting/accounts', { type: 'ASSET', subtype: 'BANK' }),
@@ -305,6 +345,18 @@ export const accountingApi = {
   getTrialBalance: (params) => api.get('/accounting/reports/trial-balance', params),
   getIncomeStatement: (params) => api.get('/accounting/reports/income-statement', params),
   getBalanceSheet: (params) => api.get('/accounting/reports/balance-sheet', params),
+
+  // Journal Entries
+  getJournalEntries: (params) => api.get('/accounting/journal-entries', params),
+  getJournalEntry: (id) => api.get(`/accounting/journal-entries/${id}`),
+  createJournalEntry: (data) => api.post('/accounting/journal-entries', data),
+  updateJournalEntry: (id, data) => api.put(`/accounting/journal-entries/${id}`, data),
+  deleteJournalEntry: (id) => api.delete(`/accounting/journal-entries/${id}`),
+  postJournalEntry: (id) => api.post(`/accounting/journal-entries/${id}/post`),
+  reverseJournalEntry: (id, reason) => api.post(`/accounting/journal-entries/${id}/reverse`, { reason }),
+
+  // Accounting Settings
+  getAccountingSettings: () => api.get('/accounting/settings'),
 };
 
 // Purchasing (P2P) API

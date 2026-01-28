@@ -44,22 +44,23 @@ router.get('/counts', async (req, res) => {
     const { siteId } = req.query;
     const counts = {};
 
-    // Get ANIMAL counts from animals collection (status: 'ALL' returns all regardless of status)
-    const animals = await firestoreService.getAnimals(userData.tenantId, { siteId, status: 'ALL', skipOrder: true });
-    const activeAnimals = animals.filter(a => a.status === 'ACTIVE').length;
-    const inactiveAnimals = animals.filter(a => a.status !== 'ACTIVE').length;
+    // Get ANIMAL counts from animals collection (status: 'ALL' returns all regardless of status, high limit for accurate counts)
+    // Note: Animal statuses are lowercase ('active', 'sold', etc.)
+    const animals = await firestoreService.getAnimals(userData.tenantId, { siteId, status: 'ALL', skipOrder: true, limit: 10000 });
+    const activeAnimals = animals.filter(a => a.status === 'active').length;
+    const inactiveAnimals = animals.filter(a => a.status !== 'active').length;
     counts.ANIMAL = { total: animals.length, active: activeAnimals, inactive: inactiveAnimals };
 
-    // Get LAND counts from landTracts collection
-    const landTracts = await firestoreService.getLandTracts(userData.tenantId, { siteId, status: null });
+    // Get LAND counts from landTracts collection (use high limit for accurate counts)
+    const landTracts = await firestoreService.getLandTracts(userData.tenantId, { siteId, status: null, limit: 10000 });
     const activeLand = landTracts.filter(t => t.status === 'active').length;
     const inactiveLand = landTracts.filter(t => t.status !== 'active').length;
     counts.LAND = { total: landTracts.length, active: activeLand, inactive: inactiveLand };
 
-    // Get counts for other asset types from assets collection
+    // Get counts for other asset types from assets collection (use high limit for accurate counts)
     const otherTypes = Object.values(AssetType).filter(t => t !== 'ANIMAL' && t !== 'LAND');
     for (const type of otherTypes) {
-      const assets = await firestoreService.getAssets(userData.tenantId, { assetType: type, siteId, skipOrder: true });
+      const assets = await firestoreService.getAssets(userData.tenantId, { assetType: type, siteId, skipOrder: true, limit: 10000 });
       const active = assets.filter(a => a.status === 'ACTIVE').length;
       const inactive = assets.filter(a => a.status !== 'ACTIVE').length;
       counts[type] = { total: assets.length, active, inactive };
