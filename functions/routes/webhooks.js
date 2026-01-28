@@ -2,6 +2,21 @@ const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
 const Tenant = require('../models/Tenant');
+const firestoreService = require('../services/firestore');
+
+const PRICE_PLAN_MAP = {
+  // Homestead
+  [process.env.STRIPE_PRICE_HOMESTEAD_MONTHLY || 'price_1SuVhICN4d8r3Upqq4JXqLeY']: 'homestead',
+  [process.env.STRIPE_PRICE_HOMESTEAD_ANNUAL || 'price_1SuWJPCN4d8r3UpqfZIDYUsb']: 'homestead',
+  // Ranch Growth
+  [process.env.STRIPE_PRICE_RANCH_GROWTH_MONTHLY || 'price_1SuWFaCN4d8r3Upq32QHpoFG']: 'ranchGrowth',
+  [process.env.STRIPE_PRICE_RANCH_GROWTH_ANNUAL || 'price_1SuWKJCN4d8r3UpqAJyQd1gs']: 'ranchGrowth',
+  // Ranch Pro
+  [process.env.STRIPE_PRICE_RANCH_PRO_MONTHLY || 'price_1SuWHYCN4d8r3UpqLTB68PwP']: 'ranchPro',
+  [process.env.STRIPE_PRICE_RANCH_PRO_ANNUAL || 'price_1SuWKnCN4d8r3UpqjUNMoSuq']: 'ranchPro',
+};
+
+const getPlanFromPriceId = (priceId) => PRICE_PLAN_MAP[priceId] || null;
 
 // Helper to find tenant by either MongoDB ID or Firestore ID
 const findTenant = async (tenantId) => {
@@ -45,13 +60,34 @@ router.post('/stripe', async (req, res) => {
         const userId = session.metadata?.userId;
 
         if (tenantId || firestoreId) {
+          let plan = session.metadata?.plan;
+          const priceId = session.metadata?.priceId;
+          if (!plan && priceId) {
+            plan = getPlanFromPriceId(priceId);
+          }
+
+          // Try to detect plan from subscription items if needed
+          if (!plan && session.subscription) {
+            try {
+              const subscription = await stripe.subscriptions.retrieve(session.subscription, {
+                expand: ['items.data.price'],
+              });
+              const subPriceId = subscription.items?.data?.[0]?.price?.id;
+              plan = getPlanFromPriceId(subPriceId);
+            } catch (err) {
+              console.warn('Failed to fetch subscription price for plan mapping:', err.message);
+            }
+          }
+
+          const resolvedPlan = plan || 'homestead';
+
           // Try to find existing tenant
           let tenant = await findTenant(tenantId) || await findTenant(firestoreId);
 
           if (tenant) {
             // Update existing tenant
             tenant.subscriptionStatus = 'active';
-            tenant.plan = 'professional';
+            tenant.plan = resolvedPlan;
             tenant.stripeCustomerId = session.customer;
             tenant.stripeSubscriptionId = session.subscription;
             tenant.status = 'active';
@@ -59,7 +95,12 @@ router.post('/stripe', async (req, res) => {
               tenant.firestoreId = firestoreId;
             }
             await tenant.save();
-            console.log(`Tenant ${tenant._id} upgraded to professional`);
+            if (tenant.firestoreId) {
+              await firestoreService.updateTenant(tenant.firestoreId, { plan: resolvedPlan });
+            } else if (firestoreId) {
+              await firestoreService.updateTenant(firestoreId, { plan: resolvedPlan });
+            }
+            console.log(`Tenant ${tenant._id} upgraded to ${resolvedPlan}`);
           } else if (firestoreId) {
             // Create new tenant in MongoDB linked to Firestore
             const slug = `tenant-${firestoreId.toLowerCase().substring(0, 8)}-${Date.now().toString(36)}`;
@@ -67,12 +108,13 @@ router.post('/stripe', async (req, res) => {
               name: customerEmail ? `${customerEmail.split('@')[0]}'s Farm` : 'New Farm',
               slug,
               firestoreId,
-              plan: 'professional',
+              plan: resolvedPlan,
               status: 'active',
               subscriptionStatus: 'active',
               stripeCustomerId: session.customer,
               stripeSubscriptionId: session.subscription,
             });
+            await firestoreService.updateTenant(firestoreId, { plan: resolvedPlan });
             console.log(`Created new tenant ${tenant._id} for Firestore ${firestoreId}`);
           }
         }
@@ -86,10 +128,16 @@ router.post('/stripe', async (req, res) => {
         // Find tenant by Stripe customer ID and update
         const tenant = await Tenant.findOne({ stripeCustomerId: subscription.customer });
         if (tenant) {
+          const priceId = subscription.items?.data?.[0]?.price?.id;
+          const plan = getPlanFromPriceId(priceId);
           tenant.subscriptionStatus = subscription.status;
           tenant.stripeSubscriptionId = subscription.id;
           tenant.currentPeriodEnd = new Date(subscription.current_period_end * 1000);
+          if (plan) tenant.plan = plan;
           await tenant.save();
+          if (tenant.firestoreId) {
+            await firestoreService.updateTenant(tenant.firestoreId, { plan: tenant.plan });
+          }
         }
         break;
       }
@@ -100,14 +148,20 @@ router.post('/stripe', async (req, res) => {
 
         const tenant = await Tenant.findOne({ stripeSubscriptionId: subscription.id });
         if (tenant) {
+          const priceId = subscription.items?.data?.[0]?.price?.id;
+          const plan = getPlanFromPriceId(priceId);
           tenant.subscriptionStatus = subscription.status;
           tenant.currentPeriodEnd = new Date(subscription.current_period_end * 1000);
+          if (plan) tenant.plan = plan;
 
           // Check if downgraded/cancelled
           if (subscription.cancel_at_period_end) {
             tenant.cancelAtPeriodEnd = true;
           }
           await tenant.save();
+          if (tenant.firestoreId) {
+            await firestoreService.updateTenant(tenant.firestoreId, { plan: tenant.plan });
+          }
         }
         break;
       }
@@ -120,11 +174,14 @@ router.post('/stripe', async (req, res) => {
         const tenant = await Tenant.findOne({ stripeSubscriptionId: subscription.id });
         if (tenant) {
           tenant.subscriptionStatus = 'canceled';
-          tenant.subscriptionTier = 'starter';
+          tenant.plan = 'free';
           tenant.stripeSubscriptionId = null;
           tenant.cancelAtPeriodEnd = false;
           await tenant.save();
-          console.log(`Tenant ${tenant._id} downgraded to starter`);
+          if (tenant.firestoreId) {
+            await firestoreService.updateTenant(tenant.firestoreId, { plan: 'free' });
+          }
+          console.log(`Tenant ${tenant._id} downgraded to free`);
         }
         break;
       }

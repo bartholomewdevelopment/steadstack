@@ -35,6 +35,7 @@ import {
   RunlistDetail,
 } from './pages/app/tasks';
 import {
+  AccountingOverview,
   ChartOfAccounts,
   AccountsReceivable,
   AccountsPayable,
@@ -176,7 +177,7 @@ function App() {
         <Route path="tasks/lists/:id" element={<RunlistDetail />} />
         <Route path="tasks/lists/:id/edit" element={<RunlistForm />} />
         {/* Accounting Module */}
-        <Route path="accounting" element={<ChartOfAccounts />} />
+        <Route path="accounting" element={<AccountingOverview />} />
         <Route path="accounting/chart-of-accounts" element={<ChartOfAccounts />} />
         <Route path="accounting/accounts/:id" element={<AccountDetail />} />
         <Route path="accounting/ar" element={<AccountsReceivable />} />

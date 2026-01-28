@@ -2,6 +2,39 @@ const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
 const Tenant = require('../models/Tenant');
+const firestoreService = require('../services/firestore');
+
+const PRICE_IDS = {
+  homestead: {
+    monthly: process.env.STRIPE_PRICE_HOMESTEAD_MONTHLY || 'price_1SuVhICN4d8r3Upqq4JXqLeY',
+    annual: process.env.STRIPE_PRICE_HOMESTEAD_ANNUAL || 'price_1SuWJPCN4d8r3UpqfZIDYUsb',
+  },
+  ranchGrowth: {
+    monthly: process.env.STRIPE_PRICE_RANCH_GROWTH_MONTHLY || 'price_1SuWFaCN4d8r3Upq32QHpoFG',
+    annual: process.env.STRIPE_PRICE_RANCH_GROWTH_ANNUAL || 'price_1SuWKJCN4d8r3UpqAJyQd1gs',
+  },
+  ranchPro: {
+    monthly: process.env.STRIPE_PRICE_RANCH_PRO_MONTHLY || 'price_1SuWHYCN4d8r3UpqLTB68PwP',
+    annual: process.env.STRIPE_PRICE_RANCH_PRO_ANNUAL || 'price_1SuWKnCN4d8r3UpqjUNMoSuq',
+  },
+};
+
+const getPlanFromPriceId = (priceId) => {
+  if (!priceId) return null;
+  for (const [plan, cycles] of Object.entries(PRICE_IDS)) {
+    if (cycles.monthly === priceId || cycles.annual === priceId) {
+      return plan;
+    }
+  }
+  return null;
+};
+
+const getPriceId = (plan, billingCycle) => {
+  if (!plan || plan === 'free') return null;
+  const planConfig = PRICE_IDS[plan];
+  if (!planConfig) return null;
+  return planConfig[billingCycle] || planConfig.monthly;
+};
 
 // Initialize Stripe lazily
 const getStripe = () => {
@@ -25,7 +58,7 @@ const findTenant = async (tenantId) => {
 // Create checkout session for subscription
 router.post('/create-checkout-session', async (req, res) => {
   try {
-    const { tenantId, userId, userEmail } = req.body;
+    const { tenantId, userId, userEmail, plan, billingCycle = 'monthly' } = req.body;
 
     if (!tenantId || !userEmail) {
       return res.status(400).json({
@@ -34,22 +67,36 @@ router.post('/create-checkout-session', async (req, res) => {
       });
     }
 
-    const priceId = process.env.STRIPE_PRICE_ID;
+    if (!plan || plan === 'free') {
+      return res.status(400).json({
+        success: false,
+        message: 'Paid plan required to start checkout',
+      });
+    }
+
+    const priceId = getPriceId(plan, billingCycle);
     if (!priceId) {
       return res.status(500).json({
         success: false,
-        message: 'Stripe price not configured',
+        message: 'Stripe price not configured for this plan',
       });
     }
 
     // Try to find existing tenant, but don't require it
     const tenant = await findTenant(tenantId);
 
-    // If tenant exists and has active subscription, block
-    if (tenant && tenant.subscriptionStatus === 'active') {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant already has an active subscription',
+    // If tenant has active subscription, send them to billing portal to upgrade/downgrade
+    if (tenant && tenant.subscriptionStatus === 'active' && tenant.stripeCustomerId) {
+      const stripe = getStripe();
+      const session = await stripe.billingPortal.sessions.create({
+        customer: tenant.stripeCustomerId,
+        return_url: `${process.env.CORS_ORIGIN || 'https://stead-stack.web.app'}/app/settings?tab=billing`,
+      });
+
+      return res.json({
+        success: true,
+        url: session.url,
+        mode: 'portal',
       });
     }
 
@@ -71,6 +118,9 @@ router.post('/create-checkout-session', async (req, res) => {
         tenantId: tenant ? tenant._id.toString() : tenantId,
         firestoreId: tenantId,
         userId: userId || '',
+        plan,
+        billingCycle,
+        priceId,
       },
       success_url: `${process.env.CORS_ORIGIN || 'https://stead-stack.web.app'}/app/settings?session_id={CHECKOUT_SESSION_ID}&success=true`,
       cancel_url: `${process.env.CORS_ORIGIN || 'https://stead-stack.web.app'}/app/settings?canceled=true`,
@@ -102,7 +152,7 @@ router.get('/subscription/:tenantId', async (req, res) => {
       return res.json({
         success: true,
         data: {
-          plan: 'starter',
+          plan: 'free',
           status: 'trial',
           subscriptionStatus: null,
           currentPeriodEnd: null,
@@ -112,15 +162,65 @@ router.get('/subscription/:tenantId', async (req, res) => {
       });
     }
 
+    let plan = tenant.plan;
+    let subscriptionStatus = tenant.subscriptionStatus;
+    let currentPeriodEnd = tenant.currentPeriodEnd;
+    let cancelAtPeriodEnd = tenant.cancelAtPeriodEnd;
+
+    try {
+      const stripe = getStripe();
+      let subscription = null;
+
+      if (tenant.stripeSubscriptionId) {
+        subscription = await stripe.subscriptions.retrieve(tenant.stripeSubscriptionId, {
+          expand: ['items.data.price'],
+        });
+      } else if (tenant.stripeCustomerId) {
+        const subscriptions = await stripe.subscriptions.list({
+          customer: tenant.stripeCustomerId,
+          status: 'all',
+          limit: 1,
+        });
+        subscription = subscriptions.data?.[0] || null;
+      }
+
+      if (subscription) {
+        const priceId = subscription.items?.data?.[0]?.price?.id;
+        const mappedPlan = getPlanFromPriceId(priceId);
+        if (mappedPlan) {
+          plan = mappedPlan;
+          tenant.plan = mappedPlan;
+          // Keep Firestore in sync so usage summary uses the right plan
+          if (tenant.firestoreId) {
+            await firestoreService.updateTenant(tenant.firestoreId, { plan: mappedPlan });
+          }
+        }
+
+        subscriptionStatus = subscription.status;
+        currentPeriodEnd = new Date(subscription.current_period_end * 1000);
+        cancelAtPeriodEnd = !!subscription.cancel_at_period_end;
+
+        tenant.subscriptionStatus = subscriptionStatus;
+        tenant.currentPeriodEnd = currentPeriodEnd;
+        tenant.cancelAtPeriodEnd = cancelAtPeriodEnd;
+        if (!tenant.stripeSubscriptionId) {
+          tenant.stripeSubscriptionId = subscription.id;
+        }
+        await tenant.save();
+      }
+    } catch (err) {
+      console.warn('Failed to force sync subscription from Stripe:', err.message);
+    }
+
     res.json({
       success: true,
       data: {
-        plan: tenant.plan,
+        plan,
         status: tenant.status,
-        subscriptionStatus: tenant.subscriptionStatus,
-        currentPeriodEnd: tenant.currentPeriodEnd,
-        cancelAtPeriodEnd: tenant.cancelAtPeriodEnd,
-        hasActiveSubscription: tenant.subscriptionStatus === 'active',
+        subscriptionStatus,
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+        hasActiveSubscription: subscriptionStatus === 'active',
       },
     });
   } catch (error) {

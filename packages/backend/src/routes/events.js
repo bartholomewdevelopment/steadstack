@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Event, InventoryItem, Site } = require('../models');
 const { verifyToken, requireTenantAccess } = require('../middleware/auth');
+const { checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
 const eventPostingService = require('../services/eventPosting');
 
 // All routes require authentication
@@ -102,7 +103,7 @@ router.get('/:id', async (req, res) => {
  * POST /api/events
  * Create a new event (and optionally auto-post)
  */
-router.post('/', async (req, res) => {
+router.post('/', checkPlanLimit('eventsPerMonth'), async (req, res) => {
   try {
     const {
       siteId,
@@ -201,6 +202,12 @@ router.post('/', async (req, res) => {
     const populatedEvent = await Event.findById(event._id)
       .populate('siteId', 'name code')
       .populate('createdBy', 'displayName email');
+
+    // Increment usage counter (use Firestore tenantId from middleware)
+    const firestoreTenantId = req.userData?.tenantId;
+    if (firestoreTenantId) {
+      await incrementUsageAfterCreate(firestoreTenantId, 'eventsPerMonth');
+    }
 
     res.status(201).json({ event: populatedEvent });
   } catch (error) {

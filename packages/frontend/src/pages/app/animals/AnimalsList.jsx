@@ -229,7 +229,7 @@ export default function AnimalsList() {
               onChange={(e) => handleFilterChange('status', e.target.value)}
               className="input py-2 min-w-[140px]"
             >
-              <option value="">All Statuses</option>
+              <option value="ALL">All Statuses</option>
               <option value="active">Active</option>
               <option value="sold">Sold</option>
               <option value="deceased">Deceased</option>

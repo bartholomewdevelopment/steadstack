@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, query, validationResult } = require('express-validator');
 const { verifyToken } = require('../middleware/auth');
+const { checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
 const Contact = require('../models/Contact');
 const { ContactType } = require('../models/Contact');
 const firestoreService = require('../services/firestore');
@@ -113,6 +114,7 @@ router.post(
       .withMessage('Invalid contact type'),
     body('name').notEmpty().withMessage('Name is required'),
   ],
+  checkPlanLimit('contacts'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -120,7 +122,8 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const { tenantId } = await getUserContext(req);
+      // Use tenant from middleware if available, otherwise fetch
+      const tenantId = req.userData?.tenantId || (await getUserContext(req)).tenantId;
 
       const contactData = {
         tenantId,
@@ -173,6 +176,9 @@ router.post(
       }
 
       const contact = await Contact.create(contactData);
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(tenantId, 'contacts');
 
       res.status(201).json({
         success: true,

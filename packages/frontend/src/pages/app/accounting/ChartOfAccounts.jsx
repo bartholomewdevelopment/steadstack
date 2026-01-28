@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { accountingApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
+import AccountingNav from '../../../components/accounting/AccountingNav';
 
 // CSV parsing helper
 const parseCSV = (text) => {
@@ -224,7 +225,9 @@ export default function ChartOfAccounts() {
   };
 
   return (
-    <div className="space-y-6">
+    <div>
+      <AccountingNav />
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -691,6 +694,7 @@ export default function ChartOfAccounts() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

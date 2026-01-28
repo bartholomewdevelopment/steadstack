@@ -120,12 +120,34 @@ export default function JournalEntryForm() {
       return false;
     }
 
-    const validLines = formData.lines.filter(
-      (line) => line.accountId && (parseFloat(line.debit) > 0 || parseFloat(line.credit) > 0)
-    );
+    // Check that totals are non-zero (use same parsing as totalDebits/totalCredits)
+    if (totalDebits === 0 && totalCredits === 0) {
+      setError('Please enter debit and credit amounts');
+      return false;
+    }
 
-    if (validLines.length < 2) {
-      setError('At least 2 lines with amounts are required');
+    // Check lines with amounts - use parseFloat to match totals calculation
+    const linesWithAmounts = formData.lines.filter((line) => {
+      const debit = parseFloat(line.debit) || 0;
+      const credit = parseFloat(line.credit) || 0;
+      return debit > 0 || credit > 0;
+    });
+
+    if (linesWithAmounts.length < 2) {
+      setError(`Need at least 2 lines with amounts (found ${linesWithAmounts.length}). Each journal entry needs a debit line and a credit line.`);
+      return false;
+    }
+
+    // Check that all lines with amounts have accounts selected
+    const linesWithoutAccounts = linesWithAmounts.filter((line) => !line.accountId);
+    if (linesWithoutAccounts.length > 0) {
+      setError('Please select an account for each line with an amount');
+      return false;
+    }
+
+    // Check balance
+    if (!isBalanced) {
+      setError('Entry must be balanced (total debits must equal total credits)');
       return false;
     }
 

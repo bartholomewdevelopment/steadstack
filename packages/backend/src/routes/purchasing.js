@@ -6,6 +6,7 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { verifyToken } = require('../middleware/auth');
+const { requireFeature, checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
 const firestoreService = require('../services/firestore');
 const p2pService = require('../services/p2p-service');
 
@@ -335,6 +336,8 @@ router.post(
     body('vendorId').notEmpty().withMessage('Vendor ID is required'),
     body('lineItems').isArray({ min: 1 }).withMessage('At least one line item is required'),
   ],
+  requireFeature('purchasingEnabled'),
+  checkPlanLimit('posPerMonth'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -342,8 +345,12 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const { tenantId } = await getUserContext(req);
+      // Use userData from middleware if available
+      const tenantId = req.userData?.tenantId || (await getUserContext(req)).tenantId;
       const purchaseOrder = await p2pService.createPurchaseOrder(tenantId, req.body, req.firebaseUser.uid);
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(tenantId, 'posPerMonth');
 
       res.status(201).json({ success: true, data: { purchaseOrder } });
     } catch (error) {
@@ -575,6 +582,8 @@ router.post(
     body('dueDate').notEmpty().withMessage('Due date is required'),
     body('lines').isArray({ min: 1 }).withMessage('At least one line is required'),
   ],
+  requireFeature('purchasingEnabled'),
+  checkPlanLimit('billsPerMonth'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -582,8 +591,12 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const { tenantId } = await getUserContext(req);
+      // Use userData from middleware if available
+      const tenantId = req.userData?.tenantId || (await getUserContext(req)).tenantId;
       const bill = await p2pService.createVendorBill(tenantId, req.body, req.firebaseUser.uid);
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(tenantId, 'billsPerMonth');
 
       res.status(201).json({ success: true, data: { bill } });
     } catch (error) {

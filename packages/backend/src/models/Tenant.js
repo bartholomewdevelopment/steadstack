@@ -18,8 +18,9 @@ const tenantSchema = new mongoose.Schema(
     },
     plan: {
       type: String,
-      enum: ['starter', 'professional', 'enterprise'],
-      default: 'starter',
+      // Include both legacy and new plan names for migration period
+      enum: ['starter', 'professional', 'enterprise', 'free', 'homestead', 'ranchGrowth', 'ranchPro'],
+      default: 'free',
     },
     status: {
       type: String,
@@ -28,6 +29,31 @@ const tenantSchema = new mongoose.Schema(
     },
     trialEndsAt: {
       type: Date,
+    },
+    // Billing cycle tracking (for monthly limit resets)
+    billingCycleStart: {
+      type: Date,
+    },
+    // Stripe integration
+    stripeCustomerId: {
+      type: String,
+      sparse: true,
+    },
+    stripeSubscriptionId: {
+      type: String,
+      sparse: true,
+    },
+    subscriptionStatus: {
+      type: String,
+      enum: ['active', 'canceled', 'past_due', 'trialing', 'incomplete', null],
+      default: null,
+    },
+    currentPeriodEnd: {
+      type: Date,
+    },
+    cancelAtPeriodEnd: {
+      type: Boolean,
+      default: false,
     },
     settings: {
       timezone: { type: String, default: 'America/Chicago' },

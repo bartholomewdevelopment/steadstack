@@ -39,6 +39,12 @@ class ApiClient {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+
+      // Handle plan limit errors - emit event for UpgradeModal
+      if (errorData.code === 'PLAN_LIMIT_EXCEEDED' || errorData.code === 'FEATURE_NOT_AVAILABLE') {
+        window.dispatchEvent(new CustomEvent('plan-limit-error', { detail: errorData }));
+      }
+
       // Handle validation errors (array of errors from express-validator)
       if (errorData.errors && Array.isArray(errorData.errors)) {
         const messages = errorData.errors.map((e) => e.msg || e.message).join(', ');
@@ -449,6 +455,14 @@ export const billingApi = {
   createCheckoutSession: (data) => api.post('/billing/create-checkout-session', data),
   getSubscription: (tenantId) => api.get(`/billing/subscription/${tenantId}`),
   createPortalSession: (data) => api.post('/billing/create-portal-session', data),
+};
+
+// Usage API
+export const usageApi = {
+  getUsage: () => api.get('/usage'),
+  getPlans: () => api.get('/usage/plans'),
+  checkLimit: (resourceType, increment = 1) =>
+    api.get(`/usage/check/${resourceType}`, { increment }),
 };
 
 // Admin API (superadmin only)

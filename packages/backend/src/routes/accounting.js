@@ -15,6 +15,7 @@ const {
   JournalEntry,
 } = require('../models');
 const { verifyToken } = require('../middleware/auth');
+const { requireFeature } = require('../middleware/planLimits');
 
 const router = express.Router();
 
@@ -337,8 +338,8 @@ router.delete('/customers/:id', async (req, res, next) => {
   }
 });
 
-// A/R Aging
-router.get('/ar/aging', async (req, res, next) => {
+// A/R Aging (requires advanced accounting)
+router.get('/ar/aging', requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const today = new Date();
@@ -460,8 +461,8 @@ router.delete('/vendors/:id', async (req, res, next) => {
   }
 });
 
-// A/P Aging
-router.get('/ap/aging', async (req, res, next) => {
+// A/P Aging (requires advanced accounting)
+router.get('/ap/aging', requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const today = new Date();
@@ -1554,10 +1555,10 @@ router.put('/deposits/:id', async (req, res, next) => {
 });
 
 // ============================================
-// BANK RECONCILIATION
+// BANK RECONCILIATION (requires advanced accounting)
 // ============================================
 
-router.get('/reconciliations', async (req, res, next) => {
+router.get('/reconciliations', requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const { bankAccountId, status } = req.query;
@@ -1574,7 +1575,7 @@ router.get('/reconciliations', async (req, res, next) => {
   }
 });
 
-router.get('/reconciliations/:id', async (req, res, next) => {
+router.get('/reconciliations/:id', requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const reconciliation = await BankReconciliation.findOne({ _id: req.params.id, tenantId })
@@ -1592,7 +1593,7 @@ router.post('/reconciliations', [
   body('bankAccountId').notEmpty(),
   body('statementDate').notEmpty(),
   body('statementEndingBalance').isNumeric(),
-], validate, async (req, res, next) => {
+], validate, requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
 
@@ -1653,7 +1654,7 @@ router.post('/reconciliations', [
   }
 });
 
-router.put('/reconciliations/:id', async (req, res, next) => {
+router.put('/reconciliations/:id', requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const reconciliation = await BankReconciliation.findOneAndUpdate(
@@ -1670,7 +1671,7 @@ router.put('/reconciliations/:id', async (req, res, next) => {
   }
 });
 
-router.post('/reconciliations/:id/complete', async (req, res, next) => {
+router.post('/reconciliations/:id/complete', requireFeature('advancedAccounting'), async (req, res, next) => {
   try {
     const tenantId = getTenantId(req);
     const reconciliation = await BankReconciliation.findOne({ _id: req.params.id, tenantId });

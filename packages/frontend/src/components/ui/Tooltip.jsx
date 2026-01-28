@@ -101,7 +101,8 @@ export default function Tooltip({
           ref={tooltipRef}
           role="tooltip"
           className={`absolute z-50 px-3 py-2 text-sm text-white bg-gray-800 rounded-lg shadow-lg
-            w-max max-w-sm animate-fade-in ${positionClasses[actualPosition]}`}
+            max-w-[min(24rem,calc(100vw-2rem))] whitespace-normal break-words text-left
+            animate-fade-in ${positionClasses[actualPosition]}`}
         >
           {content}
           <div

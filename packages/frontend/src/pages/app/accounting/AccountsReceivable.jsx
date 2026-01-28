@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { accountingApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
+import AccountingNav from '../../../components/accounting/AccountingNav';
 
 const agingBuckets = [
   { key: 'current', label: 'Current', color: 'bg-green-100 text-green-700' },
@@ -62,7 +63,9 @@ export default function AccountsReceivable() {
   const totalAR = Object.values(aging).reduce((sum, val) => sum + val, 0);
 
   return (
-    <div className="space-y-6">
+    <div>
+      <AccountingNav />
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -237,6 +240,7 @@ export default function AccountsReceivable() {
           </table>
         </div>
       )}
+      </div>
     </div>
   );
 }

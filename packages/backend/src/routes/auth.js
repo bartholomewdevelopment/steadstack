@@ -131,7 +131,7 @@ router.post(
       const mongoTenant = await Tenant.create({
         name: tenantName,
         slug,
-        plan: 'starter',
+        plan: 'free',
         status: 'trial',
         trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         firestoreId: newTenant.id, // Link to Firestore

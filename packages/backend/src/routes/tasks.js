@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { verifyToken } = require('../middleware/auth');
+const { checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
 const firestoreService = require('../services/firestore');
 const accountingService = require('../services/accounting');
 const taskInventoryService = require('../services/task-inventory-service');
@@ -93,6 +94,7 @@ router.post(
     body('estimatedDurationMinutes').optional().isNumeric(),
     body('recurrence.pattern').optional().isIn(Object.values(firestoreService.RecurrencePattern)),
   ],
+  checkPlanLimit('activeTasks'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -100,7 +102,8 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      // Use userData from middleware if available
+      const userData = req.userData || await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
       if (!userData) {
         return res.status(403).json({ success: false, message: 'User not found' });
       }
@@ -118,6 +121,9 @@ router.post(
         req.body,
         req.firebaseUser.uid
       );
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(userData.tenantId, 'activeTasks');
 
       res.status(201).json({
         success: true,
@@ -309,6 +315,7 @@ router.post(
     body('templateIds').optional().isArray(),
     body('scheduleTime').optional().matches(/^\d{2}:\d{2}$/),
   ],
+  checkPlanLimit('runlists'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -316,7 +323,8 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      // Use userData from middleware if available
+      const userData = req.userData || await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
       if (!userData) {
         return res.status(403).json({ success: false, message: 'User not found' });
       }
@@ -334,6 +342,9 @@ router.post(
         req.body,
         req.firebaseUser.uid
       );
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(userData.tenantId, 'runlists');
 
       res.status(201).json({
         success: true,
@@ -841,6 +852,7 @@ router.post(
     body('labor').optional().isObject(),
     body('vendor').optional().isObject(),
   ],
+  checkPlanLimit('activeTasks'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -848,7 +860,8 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
+      // Use userData from middleware if available
+      const userData = req.userData || await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
       if (!userData) {
         return res.status(403).json({ success: false, message: 'User not found' });
       }
@@ -866,6 +879,9 @@ router.post(
         req.body,
         req.firebaseUser.uid
       );
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(userData.tenantId, 'activeTasks');
 
       res.status(201).json({
         success: true,

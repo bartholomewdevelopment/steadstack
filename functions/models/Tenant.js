@@ -18,8 +18,9 @@ const tenantSchema = new mongoose.Schema(
     },
     plan: {
       type: String,
-      enum: ['starter', 'professional', 'enterprise'],
-      default: 'starter',
+      // Include legacy + current plan names during migration
+      enum: ['starter', 'professional', 'enterprise', 'free', 'homestead', 'ranchGrowth', 'ranchPro'],
+      default: 'free',
     },
     status: {
       type: String,
@@ -37,6 +38,18 @@ const tenantSchema = new mongoose.Schema(
     stripeSubscriptionId: {
       type: String,
       sparse: true,
+    },
+    subscriptionStatus: {
+      type: String,
+      enum: ['active', 'canceled', 'past_due', 'trialing', 'incomplete', null],
+      default: null,
+    },
+    currentPeriodEnd: {
+      type: Date,
+    },
+    cancelAtPeriodEnd: {
+      type: Boolean,
+      default: false,
     },
     subscriptionStatus: {
       type: String,

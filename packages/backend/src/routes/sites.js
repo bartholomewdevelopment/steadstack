@@ -2,6 +2,8 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { Site } = require('../models');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
+const firestoreService = require('../services/firestore');
 
 const router = express.Router();
 
@@ -97,6 +99,7 @@ router.post(
       .isFloat({ min: 0 })
       .withMessage('Acreage must be a positive number'),
   ],
+  checkPlanLimit('sites'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -112,23 +115,6 @@ router.post(
         boundaryGeometry, boundaryAreaSqMeters, boundaryAreaAcres, boundaryCentroid,
         connectedLandRuleAccepted
       } = req.body;
-
-      // Check site limit based on tenant plan
-      const siteCount = await Site.countDocuments({
-        tenantId: req.user.tenantId,
-        status: { $ne: 'archived' },
-      });
-
-      const tenant = req.user.tenantId;
-      const planLimits = { starter: 1, professional: -1 };
-      const limit = planLimits[tenant.plan] || 1;
-
-      if (limit !== -1 && siteCount >= limit) {
-        return res.status(403).json({
-          success: false,
-          message: `Your ${tenant.plan} plan allows up to ${limit} site(s). Please upgrade to add more.`,
-        });
-      }
 
       // Determine status: active if boundary is set, draft otherwise
       const status = boundaryGeometry ? 'active' : 'draft';
@@ -150,6 +136,12 @@ router.post(
         connectedLandRuleAccepted,
         status,
       });
+
+      // Increment usage counter (use Firestore tenantId from middleware)
+      const firestoreTenantId = req.userData?.tenantId;
+      if (firestoreTenantId) {
+        await incrementUsageAfterCreate(firestoreTenantId, 'sites');
+      }
 
       res.status(201).json({
         success: true,

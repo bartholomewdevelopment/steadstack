@@ -66,7 +66,8 @@ export default function DashboardHome() {
         const response = tasksRes.value;
         const tasksData = response?.data?.occurrences || response?.data?.tasks || response?.occurrences || (Array.isArray(response?.data) ? response.data : []);
         const tasks = Array.isArray(tasksData) ? tasksData : [];
-        const openTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress');
+        // Task occurrence statuses are uppercase: SCHEDULED, IN_PROGRESS, OVERDUE, COMPLETED, SKIPPED, CANCELLED
+        const openTasks = tasks.filter(t => ['SCHEDULED', 'IN_PROGRESS', 'OVERDUE', 'PENDING'].includes(t.status));
         setStats(prev => ({ ...prev, tasks: { value: openTasks.length, loading: false } }));
       } else {
         console.error('Tasks API failed:', tasksRes.reason);

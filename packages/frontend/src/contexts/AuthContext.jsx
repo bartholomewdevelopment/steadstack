@@ -95,6 +95,11 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const refreshUserProfile = async () => {
+    if (!auth.currentUser) return null;
+    return fetchUserProfile(auth.currentUser);
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
@@ -187,6 +192,7 @@ export function AuthProvider({ children }) {
     updateUserProfile,
     getIdToken,
     syncUserWithBackend,
+    refreshUserProfile,
   };
 
   return (

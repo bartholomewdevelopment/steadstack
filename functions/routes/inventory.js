@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { verifyToken } = require('../middleware/auth');
+const { checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
 const firestoreService = require('../services/firestore');
 const accountingService = require('../services/accounting');
 const { v4: uuidv4 } = require('uuid');
@@ -224,6 +225,7 @@ router.post(
     body('reorderPoint').optional().isNumeric(),
     body('reorderQty').optional().isNumeric(),
   ],
+  checkPlanLimit('inventoryItems'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -231,16 +233,20 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
-      if (!userData) {
+      // Use tenant from middleware if available
+      const tenantId = req.userData?.tenantId || (await firestoreService.findUserByAuthUid(req.firebaseUser.uid))?.tenantId;
+      if (!tenantId) {
         return res.status(403).json({ success: false, message: 'User not found' });
       }
 
       const item = await firestoreService.createInventoryItem(
-        userData.tenantId,
+        tenantId,
         req.body,
         req.firebaseUser.uid
       );
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(tenantId, 'inventoryItems');
 
       res.status(201).json({
         success: true,

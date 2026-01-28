@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { accountingApi } from '../../../services/api';
 import { HelpTooltip } from '../../../components/ui/Tooltip';
+import AccountingNav from '../../../components/accounting/AccountingNav';
 
 const statusColors = {
   DRAFT: 'bg-yellow-100 text-yellow-700',
@@ -89,7 +90,9 @@ export default function JournalEntries() {
   };
 
   return (
-    <div className="space-y-6">
+    <div>
+      <AccountingNav />
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -278,6 +281,7 @@ export default function JournalEntries() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

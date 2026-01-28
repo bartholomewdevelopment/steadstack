@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { verifyToken } = require('../middleware/auth');
+const { checkPlanLimit, incrementUsageAfterCreate } = require('../middleware/planLimits');
 const firestoreService = require('../services/firestore');
 const accountingService = require('../services/accounting');
 const taskInventoryService = require('../services/task-inventory-service');
@@ -93,6 +94,7 @@ router.post(
     body('estimatedDurationMinutes').optional().isNumeric(),
     body('recurrence.pattern').optional().isIn(Object.values(firestoreService.RecurrencePattern)),
   ],
+  checkPlanLimit('activeTasks'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -100,12 +102,14 @@ router.post(
         return res.status(400).json({ success: false, errors: errors.array() });
       }
 
-      const userData = await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
-      if (!userData) {
+      // Use tenant from middleware if available
+      const tenantId = req.userData?.tenantId || (await firestoreService.findUserByAuthUid(req.firebaseUser.uid))?.tenantId;
+      if (!tenantId) {
         return res.status(403).json({ success: false, message: 'User not found' });
       }
 
       // Check user has admin role for creating templates
+      const userData = req.userData || await firestoreService.findUserByAuthUid(req.firebaseUser.uid);
       if (!['owner', 'admin'].some((r) => userData.user.roles?.includes(r))) {
         return res.status(403).json({
           success: false,
@@ -114,10 +118,13 @@ router.post(
       }
 
       const template = await firestoreService.createTaskTemplate(
-        userData.tenantId,
+        tenantId,
         req.body,
         req.firebaseUser.uid
       );
+
+      // Increment usage counter
+      await incrementUsageAfterCreate(tenantId, 'activeTasks');
 
       res.status(201).json({
         success: true,

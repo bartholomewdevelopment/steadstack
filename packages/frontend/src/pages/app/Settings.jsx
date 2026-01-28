@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSite } from '../../contexts/SiteContext';
+import { usePlanLimits } from '../../contexts/PlanLimitsContext';
 import { billingApi } from '../../services/api';
 import { HelpTooltip } from '../../components/ui/Tooltip';
 
@@ -130,6 +131,7 @@ function ProfileSettings({ user, userProfile }) {
 
 function FarmSettings({ userProfile }) {
   const tenant = userProfile?.tenant;
+  const tenantId = tenant?._id || tenant?.id;
 
   return (
     <div className="space-y-6">
@@ -252,28 +254,74 @@ function TeamSettings({ userProfile }) {
   );
 }
 
+// Plan display configuration - prices match main website (Pricing.jsx)
+// Annual pricing is 15% off monthly rate
+const PLAN_DISPLAY = {
+  free: {
+    name: 'Free',
+    price: 0,
+    priceAnnual: 0,
+    description: 'For tiny homesteads starting out',
+    color: 'gray',
+    highlights: ['1 site', '10 animals', '25 contacts', 'Basic accounting'],
+  },
+  homestead: {
+    name: 'Homestead',
+    price: 19,
+    priceAnnual: 192,
+    description: 'For small farms that need control',
+    color: 'blue',
+    highlights: ['2 sites', '100 animals', 'Full purchasing', 'A/R & A/P'],
+  },
+  ranchGrowth: {
+    name: 'Ranch Growth',
+    price: 99,
+    priceAnnual: 1008,
+    description: 'For multi-crew operations',
+    color: 'green',
+    highlights: ['5 sites', '2,000 animals', '12 team members', 'Advanced reports'],
+  },
+  ranchPro: {
+    name: 'Ranch Pro',
+    price: 249,
+    priceAnnual: 2544,
+    description: 'For high-scale ranches',
+    color: 'purple',
+    highlights: ['Unlimited sites', '10,000 animals', '25 team members', 'Priority support'],
+  },
+};
+
+const PLAN_ORDER = ['free', 'homestead', 'ranchGrowth', 'ranchPro'];
+
 function BillingSettings({ userProfile }) {
-  const { user } = useAuth();
+  const { user, refreshUserProfile } = useAuth();
   const tenant = userProfile?.tenant;
+  const tenantId = tenant?._id || tenant?.id;
+  const { usage, currentPlan, planLimits, allPlans, loading: usageLoading, refreshUsage } = usePlanLimits();
   const [loading, setLoading] = useState(false);
   const [subscription, setSubscription] = useState(null);
   const [error, setError] = useState('');
+  const [billingCycle, setBillingCycle] = useState('monthly');
 
   // Check URL params for success/cancel
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('success') === 'true') {
-      // Subscription was successful - refresh subscription status
       fetchSubscription();
+      refreshUsage();
     }
   }, []);
 
   const fetchSubscription = async () => {
-    if (!tenant?._id && !tenant?.id) return;
+    if (!tenantId) return;
     try {
-      const result = await billingApi.getSubscription(tenant._id || tenant.id);
+      const result = await billingApi.getSubscription(tenantId);
       if (result.success) {
         setSubscription(result.data);
+        const planFromSubscription = result.data?.plan;
+        if (refreshUserProfile && planFromSubscription && planFromSubscription !== currentPlan) {
+          await refreshUserProfile();
+        }
       }
     } catch (err) {
       console.error('Failed to fetch subscription:', err);
@@ -282,9 +330,9 @@ function BillingSettings({ userProfile }) {
 
   useEffect(() => {
     fetchSubscription();
-  }, [tenant]);
+  }, [tenantId]);
 
-  const handleUpgrade = async () => {
+  const handleUpgrade = async (targetPlan) => {
     setLoading(true);
     setError('');
 
@@ -293,10 +341,11 @@ function BillingSettings({ userProfile }) {
         tenantId: tenant._id || tenant.id,
         userId: user.uid,
         userEmail: user.email,
+        plan: targetPlan,
+        billingCycle,
       });
 
       if (result.success && result.url) {
-        // Redirect to Stripe Checkout
         window.location.href = result.url;
       } else {
         setError('Failed to start checkout. Please try again.');
@@ -331,7 +380,13 @@ function BillingSettings({ userProfile }) {
     }
   };
 
-  const isSubscribed = subscription?.hasActiveSubscription || tenant?.plan === 'professional';
+  const effectivePlan = subscription?.plan || currentPlan;
+  const currentPlanIndex = PLAN_ORDER.indexOf(effectivePlan);
+  const effectivePlanLimits = allPlans?.[effectivePlan] || planLimits;
+  const getPlanLimit = (resourceKey) => effectivePlanLimits?.limits?.[resourceKey];
+
+  // Get usage stats for display
+  const usageStats = usage?.resources || {};
 
   return (
     <div className="space-y-6">
@@ -341,89 +396,287 @@ function BillingSettings({ userProfile }) {
         </div>
       )}
 
+      {/* Current Plan Card */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Current Plan</h2>
-
-        <div className={`flex items-center justify-between p-4 rounded-lg border ${
-          isSubscribed
-            ? 'bg-green-50 border-green-200'
-            : 'bg-primary-50 border-primary-200'
-        }`}>
-          <div>
-            <p className="font-semibold text-gray-900">
-              {isSubscribed ? 'Full Access' : 'Free'} Plan
-            </p>
-            <p className="text-sm text-gray-600">
-              {isSubscribed
-                ? (subscription?.cancelAtPeriodEnd
-                    ? `Cancels on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
-                    : 'Active subscription - $34.99/month')
-                : (tenant?.status === 'trial' ? 'Trial period active' : 'Free tier')}
-            </p>
-          </div>
-          {isSubscribed ? (
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Current Plan</h2>
+          {currentPlan !== 'free' && (
             <button
               onClick={handleManageSubscription}
               disabled={loading}
-              className="btn-secondary text-sm"
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
             >
               {loading ? 'Loading...' : 'Manage Subscription'}
-            </button>
-          ) : (
-            <button
-              onClick={handleUpgrade}
-              disabled={loading}
-              className="btn-primary text-sm"
-            >
-              {loading ? 'Loading...' : 'Upgrade to Full Access'}
             </button>
           )}
         </div>
 
-        <div className="mt-6 grid md:grid-cols-3 gap-4">
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-500">Sites</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {isSubscribed ? 'Unlimited' : '1 / 1'}
+        <div className={`flex items-center justify-between p-4 rounded-lg border-2 ${
+          currentPlan === 'free' ? 'bg-gray-50 border-gray-300' :
+          currentPlan === 'homestead' ? 'bg-blue-50 border-blue-300' :
+          currentPlan === 'ranchGrowth' ? 'bg-green-50 border-green-300' :
+          'bg-purple-50 border-purple-300'
+        }`}>
+          <div>
+            <p className="font-semibold text-gray-900 text-lg">
+              {PLAN_DISPLAY[effectivePlan]?.name || PLAN_DISPLAY[currentPlan]?.name || 'Free'} Plan
+            </p>
+            <p className="text-sm text-gray-600">
+              {subscription?.cancelAtPeriodEnd
+                ? `Cancels on ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
+                : PLAN_DISPLAY[effectivePlan]?.description || PLAN_DISPLAY[currentPlan]?.description}
             </p>
           </div>
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-500">Team Members</p>
+          <div className="text-right">
             <p className="text-2xl font-bold text-gray-900">
-              {isSubscribed ? '10' : '1 / 2'}
-            </p>
-          </div>
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-500">Livestock</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {isSubscribed ? 'Unlimited' : '0 / 5'}
+              ${PLAN_DISPLAY[effectivePlan]?.price || PLAN_DISPLAY[currentPlan]?.price || 0}
+              <span className="text-sm font-normal text-gray-500">/mo</span>
             </p>
           </div>
         </div>
       </div>
 
-      {!isSubscribed && (
-        <div className="bg-gradient-to-r from-primary-500 to-primary-600 rounded-xl p-6 text-white">
-          <h3 className="text-lg font-semibold mb-2">Upgrade to Full Access</h3>
-          <p className="text-primary-100 mb-4">
-            Unlock unlimited sites, livestock tracking, full inventory management,
-            double-entry accounting, and priority support.
-          </p>
-          <ul className="text-sm text-primary-100 space-y-1 mb-4">
-            <li>✓ Unlimited sites and animals</li>
-            <li>✓ Full inventory & purchasing</li>
-            <li>✓ Complete accounting system</li>
-            <li>✓ Reports and analytics</li>
-          </ul>
-          <button
-            onClick={handleUpgrade}
-            disabled={loading}
-            className="bg-white text-primary-600 px-4 py-2 rounded-lg font-medium hover:bg-primary-50 transition-colors"
-          >
-            {loading ? 'Loading...' : 'Upgrade Now - $34.99/month'}
-          </button>
+      {/* Usage Summary */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Usage Summary</h2>
+
+        {usageLoading ? (
+          <div className="animate-pulse space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-12 bg-gray-100 rounded"></div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <UsageBar
+              label="Sites"
+              current={usageStats.sites?.current || 0}
+              limit={getPlanLimit('sites')}
+              unlimited={getPlanLimit('sites') === -1}
+            />
+            <UsageBar
+              label="Animals"
+              current={usageStats.animals?.current || 0}
+              limit={getPlanLimit('animals')}
+              unlimited={getPlanLimit('animals') === -1}
+            />
+            <UsageBar
+              label="Contacts"
+              current={usageStats.contacts?.current || 0}
+              limit={getPlanLimit('contacts')}
+              unlimited={getPlanLimit('contacts') === -1}
+            />
+            <UsageBar
+              label="Inventory Items"
+              current={usageStats.inventoryItems?.current || 0}
+              limit={getPlanLimit('inventoryItems')}
+              unlimited={getPlanLimit('inventoryItems') === -1}
+            />
+            <UsageBar
+              label="Active Tasks"
+              current={usageStats.activeTasks?.current || 0}
+              limit={getPlanLimit('activeTasks')}
+              unlimited={getPlanLimit('activeTasks') === -1}
+            />
+            <UsageBar
+              label="Events (this month)"
+              current={usageStats.eventsPerMonth?.current || 0}
+              limit={getPlanLimit('eventsPerMonth')}
+              unlimited={getPlanLimit('eventsPerMonth') === -1}
+            />
+            {effectivePlanLimits?.limits?.purchasingEnabled && (
+              <UsageBar
+                label="Purchase Orders (this month)"
+                current={usageStats.posPerMonth?.current || 0}
+                limit={getPlanLimit('posPerMonth')}
+                unlimited={getPlanLimit('posPerMonth') === -1}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Feature flags */}
+        <div className="mt-6 pt-4 border-t border-gray-200">
+          <h3 className="text-sm font-medium text-gray-700 mb-3">Features</h3>
+          <div className="flex flex-wrap gap-2">
+            <FeatureBadge
+              label="Purchasing"
+              enabled={effectivePlanLimits?.limits?.purchasingEnabled}
+            />
+            <FeatureBadge
+              label="Advanced Accounting"
+              enabled={effectivePlanLimits?.limits?.advancedAccounting}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Plan Comparison */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-semibold text-gray-900">Available Plans</h2>
+
+          {/* Billing cycle toggle */}
+          <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setBillingCycle('monthly')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                billingCycle === 'monthly'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setBillingCycle('annual')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                billingCycle === 'annual'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Annual <span className="text-green-600 text-xs">Save 15%</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {PLAN_ORDER.map((planKey, index) => {
+            const plan = PLAN_DISPLAY[planKey];
+            const isCurrent = planKey === effectivePlan;
+            const isUpgrade = index > currentPlanIndex;
+            const isDowngrade = index < currentPlanIndex;
+            const price = billingCycle === 'annual' ? plan.priceAnnual : plan.price;
+            const monthlyEquivalent = billingCycle === 'annual' ? Math.round(plan.priceAnnual / 12) : plan.price;
+
+            return (
+              <div
+                key={planKey}
+                className={`rounded-xl border-2 p-4 ${
+                  isCurrent
+                    ? planKey === 'free' ? 'border-gray-400 bg-gray-50' :
+                      planKey === 'homestead' ? 'border-blue-400 bg-blue-50' :
+                      planKey === 'ranchGrowth' ? 'border-green-400 bg-green-50' :
+                      'border-purple-400 bg-purple-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-gray-900">{plan.name}</h3>
+                  {isCurrent && (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-800 text-white">
+                      Current
+                    </span>
+                  )}
+                </div>
+
+                <div className="mb-3">
+                  <span className="text-2xl font-bold text-gray-900">
+                    ${monthlyEquivalent}
+                  </span>
+                  <span className="text-gray-500">/mo</span>
+                  {billingCycle === 'annual' && price > 0 && (
+                    <p className="text-xs text-gray-500">
+                      ${price}/year billed annually
+                    </p>
+                  )}
+                </div>
+
+                <p className="text-sm text-gray-600 mb-3">{plan.description}</p>
+
+                <ul className="text-sm space-y-1 mb-4">
+                  {plan.highlights.map((highlight, i) => (
+                    <li key={i} className="flex items-center gap-1.5 text-gray-700">
+                      <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      {highlight}
+                    </li>
+                  ))}
+                </ul>
+
+                {isCurrent ? (
+                  <button
+                    disabled
+                    className="w-full py-2 px-4 text-sm font-medium rounded-lg bg-gray-200 text-gray-500 cursor-not-allowed"
+                  >
+                    Current Plan
+                  </button>
+                ) : isUpgrade ? (
+                  <button
+                    onClick={() => handleUpgrade(planKey)}
+                    disabled={loading}
+                    className="w-full py-2 px-4 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? 'Loading...' : 'Upgrade'}
+                  </button>
+                ) : isDowngrade ? (
+                  <button
+                    onClick={handleManageSubscription}
+                    disabled={loading}
+                    className="w-full py-2 px-4 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? 'Loading...' : 'Downgrade'}
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UsageBar({ label, current, limit, unlimited }) {
+  const percentage = unlimited ? 0 : limit > 0 ? Math.min((current / limit) * 100, 100) : 0;
+  const warningLevel = percentage >= 100 ? 'exceeded' : percentage >= 90 ? 'critical' : percentage >= 80 ? 'warning' : 'safe';
+
+  const barColor = {
+    safe: 'bg-green-500',
+    warning: 'bg-yellow-500',
+    critical: 'bg-orange-500',
+    exceeded: 'bg-red-500',
+  }[warningLevel];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm text-gray-700">{label}</span>
+        <span className="text-sm font-medium text-gray-900">
+          {current.toLocaleString()} / {unlimited ? 'Unlimited' : limit?.toLocaleString()}
+        </span>
+      </div>
+      {!unlimited && (
+        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className={`h-full ${barColor} transition-all duration-300`}
+            style={{ width: `${percentage}%` }}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+function FeatureBadge({ label, enabled }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
+      enabled
+        ? 'bg-green-100 text-green-700'
+        : 'bg-gray-100 text-gray-500'
+    }`}>
+      {enabled ? (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+      )}
+      {label}
+    </span>
   );
 }

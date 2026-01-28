@@ -21,17 +21,17 @@ const values = [
 
 const timeline = [
   {
-    year: '2023',
+    year: '2024',
     title: 'The Problem',
     description: 'Frustrated with spreadsheets and disconnected tools, we set out to build something better.',
   },
   {
-    year: '2024',
+    year: '2025',
     title: 'Building',
     description: 'Worked with dozens of farmers and ranchers to understand their real needs.',
   },
   {
-    year: '2025',
+    year: '2026',
     title: 'Launch',
     description: 'SteadStack goes live, helping operations across the country manage their farms.',
   },

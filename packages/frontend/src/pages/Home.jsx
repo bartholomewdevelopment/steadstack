@@ -117,37 +117,11 @@ export default function Home() {
             <div className="relative">
               <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-primary-200 via-white to-secondary-200 blur-2xl opacity-70" />
               <div className="relative rounded-3xl border border-gray-200 bg-white shadow-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-                  <div className="text-sm font-semibold text-gray-700">SteadStack Fieldboard</div>
-                  <div className="text-xs text-gray-500">Live Operations</div>
-                </div>
-                <div className="p-6 space-y-4 bg-gradient-to-br from-white via-emerald-50 to-earth-50">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm">
-                      <div className="text-xs uppercase tracking-wide text-gray-400">Active Tasks</div>
-                      <div className="mt-2 text-2xl font-bold text-gray-900">14</div>
-                      <div className="mt-1 text-xs text-amber-600">3 overdue</div>
-                    </div>
-                    <div className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm">
-                      <div className="text-xs uppercase tracking-wide text-gray-400">Livestock</div>
-                      <div className="mt-2 text-2xl font-bold text-gray-900">312</div>
-                      <div className="mt-1 text-xs text-green-600">+8 this month</div>
-                    </div>
-                  </div>
-                  <div className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm">
-                    <div className="text-xs uppercase tracking-wide text-gray-400">Recent Events</div>
-                    <div className="mt-3 space-y-2 text-sm text-gray-600">
-                      <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Feed herd - 280 lbs grain</div>
-                      <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-500" />Vaccinated pen 4</div>
-                      <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Fuel delivery posted</div>
-                    </div>
-                  </div>
-                  <div className="rounded-2xl bg-gray-900 text-white p-4 shadow-sm">
-                    <div className="text-xs uppercase tracking-wide text-gray-400">MTD Net</div>
-                    <div className="mt-2 text-2xl font-bold">$18,420</div>
-                    <div className="mt-1 text-xs text-green-400">+11% vs last month</div>
-                  </div>
-                </div>
+                <img
+                  src="/dashboard-hero.png"
+                  alt="SteadStack Dashboard - Farm management overview with tasks, livestock, and accounting"
+                  className="w-full h-auto"
+                />
               </div>
             </div>
           </div>

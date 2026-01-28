@@ -19,6 +19,7 @@ const areasRoutes = require('./areas');
 const binsRoutes = require('./bins');
 const purchasingRoutes = require('./purchasing');
 const contactsRoutes = require('./contacts');
+const usageRoutes = require('./usage');
 
 const router = express.Router();
 
@@ -42,5 +43,6 @@ router.use('/areas', areasRoutes);
 router.use('/bins', binsRoutes);
 router.use('/purchasing', purchasingRoutes);
 router.use('/contacts', contactsRoutes);
+router.use('/usage', usageRoutes);
 
 module.exports = router;

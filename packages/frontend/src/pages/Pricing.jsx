@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { InfoTooltip } from '../components/ui/Tooltip';
 
 const ANNUAL_DISCOUNT = 0.15;
 
@@ -88,6 +89,41 @@ const comparisonRows = [
   { feature: 'Storage', free: '1 GB', homestead: '5 GB', growth: '25 GB', pro: '100 GB' },
 ];
 
+const featureTooltips = {
+  Sites: 'Physical locations you operate (ranches, farms, or distinct properties).',
+  Users: 'People who can log in and work inside the account.',
+  Animals: 'Active livestock tracked individually or in groups.',
+  'Active tasks': 'Open tasks assigned to your team at any given time.',
+  Runlists: 'Reusable checklists that generate daily task runs.',
+  'Events / month': 'Operational records that can post to inventory and accounting.',
+  'Inventory items': 'Unique SKUs you track across all sites.',
+  Contacts: 'Customers, vendors, employees, contractors, and companies.',
+  Purchasing: 'Monthly limit for purchase orders and vendor bills.',
+  Accounting: 'Depth of accounting tools and automation included.',
+  Storage: 'Total file and document storage included.',
+};
+
+const includeTooltips = [
+  { match: /site/i, text: 'Number of physical locations you can manage under one account.' },
+  { match: /user/i, text: 'How many team members can log in with their own credentials.' },
+  { match: /animal/i, text: 'Maximum livestock tracked across individuals and groups.' },
+  { match: /task/i, text: 'Active task capacity for daily work and recurring schedules.' },
+  { match: /runlist/i, text: 'Reusable checklists that auto-generate task runs.' },
+  { match: /event/i, text: 'Operational records that trigger inventory and accounting updates.' },
+  { match: /inventory/i, text: 'Track stock levels, weighted costs, and reorder alerts by site.' },
+  { match: /purchasing/i, text: 'Full procure-to-pay workflow with requisitions, POs, and bills.' },
+  { match: /accounting/i, text: 'Double-entry ledger, A/R, A/P, and reconciliation.' },
+  { match: /report/i, text: 'Built-in analytics and financial statements.' },
+  { match: /support/i, text: 'Priority response times and onboarding help where noted.' },
+  { match: /storage/i, text: 'Total document storage included in the plan.' },
+  { match: /export/i, text: 'Download reports and data for backups or auditing.' },
+];
+
+const getIncludeTooltip = (label) => {
+  const match = includeTooltips.find((entry) => entry.match.test(label));
+  return match ? match.text : '';
+};
+
 const faqs = [
   {
     question: 'How does annual billing work?',
@@ -164,7 +200,7 @@ export default function Pricing() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid gap-8 lg:grid-cols-4">
             {plans.map((plan) => {
-              const annualMonthly = plan.monthly * (1 - ANNUAL_DISCOUNT);
+              const annualMonthly = Math.round(plan.monthly * (1 - ANNUAL_DISCOUNT));
               const displayMonthly = billingCycle === 'annual' ? annualMonthly : plan.monthly;
               const annualTotal = annualMonthly * 12;
 
@@ -216,7 +252,12 @@ export default function Pricing() {
                     {plan.includes.map((item) => (
                       <li key={item} className="flex items-start gap-2">
                         <span className={`mt-1 h-2 w-2 rounded-full ${plan.highlight ? 'bg-secondary-300' : 'bg-primary-500'}`} />
-                        {item}
+                        <span className="inline-flex items-center gap-2">
+                          {item}
+                          {getIncludeTooltip(item) && (
+                            <InfoTooltip content={getIncludeTooltip(item)} size="sm" position="top" />
+                          )}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -262,7 +303,14 @@ export default function Pricing() {
               <tbody>
                 {comparisonRows.map((row) => (
                   <tr key={row.feature} className="border-t border-gray-100">
-                    <td className="px-4 py-4 text-sm text-gray-900">{row.feature}</td>
+                    <td className="px-4 py-4 text-sm text-gray-900">
+                      <span className="inline-flex items-center gap-2">
+                        {row.feature}
+                        {featureTooltips[row.feature] && (
+                          <InfoTooltip content={featureTooltips[row.feature]} size="sm" position="top" />
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-4 text-center text-sm text-gray-600">{row.free}</td>
                     <td className="px-4 py-4 text-center text-sm text-gray-700">{row.homestead}</td>
                     <td className="px-4 py-4 text-center text-sm text-gray-600">{row.growth}</td>

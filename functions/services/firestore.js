@@ -1482,11 +1482,13 @@ const getAnimals = async (tenantId, options = {}) => {
     .doc(tenantId)
     .collection('animals');
 
-  // status: 'ALL' returns all animals regardless of status
+  // status: 'ALL' returns all animals regardless of status (requires client-side sorting)
   // status: null/undefined defaults to ACTIVE only
   // status: 'ACTIVE', 'SOLD', etc. filters by that specific status
+  let skipOrderForAll = false;
   if (status === 'ALL') {
-    // No status filter - return all
+    // No status filter - return all, skip DB ordering to avoid composite index requirement
+    skipOrderForAll = true;
   } else if (status) {
     query = query.where('status', '==', status);
   } else {
@@ -1505,8 +1507,8 @@ const getAnimals = async (tenantId, options = {}) => {
     query = query.where('species', '==', species);
   }
 
-  // Skip ordering to avoid composite index requirement for counts/aggregation queries
-  if (!skipOrder) {
+  // Skip ordering to avoid composite index requirement for counts/aggregation queries or ALL status
+  if (!skipOrder && !skipOrderForAll) {
     query = query.orderBy('tagNumber');
   }
 
@@ -1540,6 +1542,11 @@ const getAnimals = async (tenantId, options = {}) => {
         a.name?.toLowerCase().includes(searchLower) ||
         a.breed?.toLowerCase().includes(searchLower)
     );
+  }
+
+  // Sort client-side if we skipped DB ordering (for ALL status)
+  if (skipOrderForAll) {
+    animals.sort((a, b) => (a.tagNumber || '').localeCompare(b.tagNumber || ''));
   }
 
   // Calculate age for each animal

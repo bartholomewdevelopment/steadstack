@@ -21,6 +21,7 @@ const binsRoutes = require('./bins');
 const webhooksRoutes = require('./webhooks');
 const billingRoutes = require('./billing');
 const contactsRoutes = require('./contacts');
+const usageRoutes = require('./usage');
 
 const router = express.Router();
 
@@ -46,5 +47,6 @@ router.use('/bins', binsRoutes);
 router.use('/webhooks', webhooksRoutes);
 router.use('/billing', billingRoutes);
 router.use('/contacts', contactsRoutes);
+router.use('/usage', usageRoutes);
 
 module.exports = router;

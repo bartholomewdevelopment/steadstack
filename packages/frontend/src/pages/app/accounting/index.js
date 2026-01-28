@@ -1,3 +1,4 @@
+export { default as AccountingOverview } from './AccountingOverview';
 export { default as ChartOfAccounts } from './ChartOfAccounts';
 export { default as AccountDetail } from './AccountDetail';
 export { default as AccountsReceivable } from './AccountsReceivable';
